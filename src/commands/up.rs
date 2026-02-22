@@ -1,9 +1,8 @@
 use anyhow::{bail, Context, Result};
-use std::collections::HashSet;
+use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
-use crate::commands::watch;
 use crate::docker;
 use crate::forward_ports;
 use crate::workspace;
@@ -59,15 +58,49 @@ pub fn run(args: &UpArgs) -> Result<()> {
     }
 
     if args.watch {
-        let config = watch::WatchConfig {
-            interval: 2,
-            min_port: 1024,
-            exclude_ports: HashSet::new(),
-        };
-        watch::run_watch(&config)?;
+        spawn_watcher()?;
     }
 
     Ok(())
+}
+
+/// Spawn `dcw port watch` as a detached background process.
+fn spawn_watcher() -> Result<()> {
+    let exe = std::env::current_exe().context("failed to get current executable path")?;
+    let pid_file = workspace::watcher_pid_file()?;
+
+    // Kill any existing watcher first
+    stop_watcher_if_running(&pid_file);
+
+    if let Some(parent) = pid_file.parent() {
+        fs::create_dir_all(parent).context("failed to create runtime directory")?;
+    }
+
+    let child = Command::new(exe)
+        .args(["port", "watch"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("failed to spawn port watcher")?;
+
+    let pid = child.id();
+    fs::write(&pid_file, pid.to_string())
+        .context("failed to write watcher PID file")?;
+
+    println!("Port watcher started (pid {pid}).");
+    Ok(())
+}
+
+fn stop_watcher_if_running(pid_file: &PathBuf) {
+    if let Ok(contents) = fs::read_to_string(pid_file) {
+        if let Ok(pid) = contents.trim().parse::<i32>() {
+            unsafe {
+                libc::kill(pid, libc::SIGTERM);
+            }
+        }
+        let _ = fs::remove_file(pid_file);
+    }
 }
 
 fn auto_forward_ports(workspace_folder: &str) -> Result<()> {

@@ -149,6 +149,7 @@ dependencies = [
  "anyhow",
  "clap",
  "ctrlc",
+ "libc",
  "serde",
  "serde_json",
 ]
