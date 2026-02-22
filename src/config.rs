@@ -138,7 +138,7 @@ pub fn resolve_config(workspace_root: &Path) -> Result<Option<PathBuf>> {
     let runtime = workspace::runtime_dir()?;
     fs::create_dir_all(&runtime).context("failed to create runtime directory")?;
 
-    let merged_path = runtime.join("devcontainer.merged.json");
+    let merged_path = runtime.join("devcontainer.json");
     let json = serde_json::to_string_pretty(&base).context("failed to serialize merged config")?;
     fs::write(&merged_path, json).context("failed to write merged config")?;
 
