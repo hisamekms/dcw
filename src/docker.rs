@@ -62,13 +62,25 @@ pub fn find_devcontainer(workspace_folder: &str) -> Result<Option<String>> {
     }
 }
 
+/// Build the Go template string for listing network names.
+fn network_list_template() -> &'static str {
+    "{{range $k, $v := .NetworkSettings.Networks}}{{$k}}\n{{end}}"
+}
+
+/// Build the Go template string for getting a container's IP on a given network.
+fn network_ip_template(network: &str) -> String {
+    format!(
+        "{{{{(index .NetworkSettings.Networks \"{network}\").IPAddress}}}}"
+    )
+}
+
 /// Get the network name for a container.
 pub fn get_container_network(container_id: &str) -> Result<String> {
     let output = Command::new("docker")
         .args([
             "inspect",
             "-f",
-            "{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}",
+            network_list_template(),
             container_id,
         ])
         .output()
@@ -94,9 +106,7 @@ pub fn get_container_network(container_id: &str) -> Result<String> {
 /// The default `bridge` network doesn't support container name/ID DNS resolution,
 /// so we need the actual IP for socat to connect to.
 pub fn get_container_ip(container_id: &str, network: &str) -> Result<String> {
-    let template = format!(
-        "{{{{.NetworkSettings.Networks.{network}.IPAddress}}}}"
-    );
+    let template = network_ip_template(network);
     let output = Command::new("docker")
         .args(["inspect", "-f", &template, container_id])
         .output()
@@ -306,4 +316,33 @@ pub fn list_port_forwards(ws_id: &str) -> Result<Vec<PortForwardInfo>> {
         .collect();
 
     Ok(forwards)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn network_list_template_contains_newline_separator() {
+        let tmpl = network_list_template();
+        // The template should separate network names with newlines
+        assert!(tmpl.contains('\n'));
+        assert!(tmpl.contains("{{$k}}"));
+    }
+
+    #[test]
+    fn network_ip_template_uses_index_function() {
+        let tmpl = network_ip_template("bridge");
+        assert!(tmpl.contains("index .NetworkSettings.Networks"));
+        assert!(tmpl.contains("\"bridge\""));
+        assert!(tmpl.contains(".IPAddress"));
+    }
+
+    #[test]
+    fn network_ip_template_handles_special_chars_in_name() {
+        let tmpl = network_ip_template("my-project_default");
+        assert!(tmpl.contains("\"my-project_default\""));
+        // Should use index function, not dot notation
+        assert!(!tmpl.contains(".Networks.my-project_default"));
+    }
 }

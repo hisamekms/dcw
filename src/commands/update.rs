@@ -91,20 +91,17 @@ fn fetch_latest_tag() -> Result<String> {
     }
 
     let body = String::from_utf8_lossy(&output.stdout);
-    let tag = body
-        .lines()
-        .find(|l| l.contains("\"tag_name\""))
-        .and_then(|l| {
-            let after_key = l.find("tag_name")? + "tag_name".len();
-            let rest = &l[after_key..];
-            // Pattern: `"tag_name": "v0.1.0"` — skip to the value's opening quote
-            let q1 = rest.find('"')? + 1;
-            let inner = &rest[q1..];
-            let q2 = inner.find('"')?;
-            Some(inner[..q2].to_string())
-        })
-        .context("could not parse tag_name from GitHub API response")?;
+    parse_tag_from_response(&body)
+}
 
+/// Extract `tag_name` from a GitHub API JSON response body.
+fn parse_tag_from_response(body: &str) -> Result<String> {
+    let json: serde_json::Value =
+        serde_json::from_str(body).context("failed to parse GitHub API response as JSON")?;
+    let tag = json["tag_name"]
+        .as_str()
+        .context("could not find tag_name in GitHub API response")?
+        .to_string();
     Ok(tag)
 }
 
@@ -152,4 +149,37 @@ fn cmd_output(cmd: &str, args: &[&str]) -> Result<String> {
         bail!("{cmd} failed: {}", String::from_utf8_lossy(&output.stderr));
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_tag_pretty_printed() {
+        let body = r#"{
+  "tag_name": "v0.2.0",
+  "name": "Release v0.2.0",
+  "draft": false
+}"#;
+        assert_eq!(parse_tag_from_response(body).unwrap(), "v0.2.0");
+    }
+
+    #[test]
+    fn parse_tag_minified() {
+        let body = r#"{"tag_name":"v1.0.0","name":"Release"}"#;
+        assert_eq!(parse_tag_from_response(body).unwrap(), "v1.0.0");
+    }
+
+    #[test]
+    fn parse_tag_missing_field() {
+        let body = r#"{"name": "Release"}"#;
+        assert!(parse_tag_from_response(body).is_err());
+    }
+
+    #[test]
+    fn parse_tag_invalid_json() {
+        let body = "not json at all";
+        assert!(parse_tag_from_response(body).is_err());
+    }
 }

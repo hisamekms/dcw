@@ -15,7 +15,7 @@ pub fn parse_forward_ports_from_value(value: &Value) -> Vec<u16> {
 
     arr.iter()
         .filter_map(|entry| match entry {
-            Value::Number(n) => n.as_u64().map(|p| p as u16),
+            Value::Number(n) => n.as_u64().and_then(|p| u16::try_from(p).ok()),
             Value::String(s) => {
                 // Handle "localhost:3000" or just "3000"
                 let port_str = s.rsplit(':').next().unwrap_or(s);
@@ -24,7 +24,7 @@ pub fn parse_forward_ports_from_value(value: &Value) -> Vec<u16> {
             Value::Object(obj) => obj
                 .get("port")
                 .and_then(|v| v.as_u64())
-                .map(|p| p as u16),
+                .and_then(|p| u16::try_from(p).ok()),
             _ => None,
         })
         .collect()
@@ -83,5 +83,17 @@ mod tests {
     fn parse_missing_forward_ports() {
         let val = json!({"name": "test"});
         assert_eq!(parse_forward_ports_from_value(&val), Vec::<u16>::new());
+    }
+
+    #[test]
+    fn parse_out_of_range_number_port_skipped() {
+        let val = json!({"forwardPorts": [3000, 70000, 8080]});
+        assert_eq!(parse_forward_ports_from_value(&val), vec![3000, 8080]);
+    }
+
+    #[test]
+    fn parse_out_of_range_object_port_skipped() {
+        let val = json!({"forwardPorts": [{"port": 3000}, {"port": 100000}]});
+        assert_eq!(parse_forward_ports_from_value(&val), vec![3000]);
     }
 }

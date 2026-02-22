@@ -5,26 +5,13 @@ use std::path::{Path, PathBuf};
 
 use crate::workspace;
 
-/// Read a JSONC file (JSON with `//` line comments) and parse it.
+/// Read a JSONC file (JSON with comments and trailing commas) and parse it.
 pub fn read_jsonc(path: &Path) -> Result<Value> {
     let content =
         fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
-
-    let stripped: String = content
-        .lines()
-        .map(|line| {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("//") {
-                ""
-            } else {
-                line
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    serde_json::from_str(&stripped)
-        .with_context(|| format!("failed to parse JSON from {}", path.display()))
+    let parsed = jsonc_parser::parse_to_serde_value(&content, &Default::default())
+        .map_err(|e| anyhow::anyhow!("failed to parse JSONC from {}: {}", path.display(), e))?;
+    parsed.context(format!("empty JSONC file: {}", path.display()))
 }
 
 /// Recursively merge `overlay` into `base`.
@@ -246,8 +233,8 @@ mod tests {
     }
 
     #[test]
-    fn read_jsonc_strips_comments() {
-        let dir = std::env::temp_dir().join("dcw-test-config-jsonc");
+    fn read_jsonc_strips_line_comments() {
+        let dir = std::env::temp_dir().join("dcw-test-config-jsonc-line");
         let _ = fs::create_dir_all(&dir);
         let path = dir.join("test.jsonc");
         fs::write(
@@ -264,6 +251,93 @@ mod tests {
 
         let val = read_jsonc(&path).unwrap();
         assert_eq!(val["forwardPorts"], json!([3000]));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_jsonc_strips_inline_comments() {
+        let dir = std::env::temp_dir().join("dcw-test-config-jsonc-inline");
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("test.jsonc");
+        fs::write(
+            &path,
+            r#"{
+    "name": "test", // inline comment
+    "forwardPorts": [3000]
+}"#,
+        )
+        .unwrap();
+
+        let val = read_jsonc(&path).unwrap();
+        assert_eq!(val["name"], "test");
+        assert_eq!(val["forwardPorts"], json!([3000]));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_jsonc_strips_block_comments() {
+        let dir = std::env::temp_dir().join("dcw-test-config-jsonc-block");
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("test.jsonc");
+        fs::write(
+            &path,
+            r#"{
+    /* block comment */
+    "name": "test",
+    /*
+     * multi-line
+     * block comment
+     */
+    "forwardPorts": [3000]
+}"#,
+        )
+        .unwrap();
+
+        let val = read_jsonc(&path).unwrap();
+        assert_eq!(val["name"], "test");
+        assert_eq!(val["forwardPorts"], json!([3000]));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_jsonc_allows_trailing_commas() {
+        let dir = std::env::temp_dir().join("dcw-test-config-jsonc-trailing");
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("test.jsonc");
+        fs::write(
+            &path,
+            r#"{
+    "name": "test",
+    "forwardPorts": [3000, 8080,],
+}"#,
+        )
+        .unwrap();
+
+        let val = read_jsonc(&path).unwrap();
+        assert_eq!(val["name"], "test");
+        assert_eq!(val["forwardPorts"], json!([3000, 8080]));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_jsonc_preserves_urls() {
+        let dir = std::env::temp_dir().join("dcw-test-config-jsonc-url");
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("test.jsonc");
+        fs::write(
+            &path,
+            r#"{
+    "image": "https://example.com/image:latest"
+}"#,
+        )
+        .unwrap();
+
+        let val = read_jsonc(&path).unwrap();
+        assert_eq!(val["image"], "https://example.com/image:latest");
 
         let _ = fs::remove_dir_all(&dir);
     }
