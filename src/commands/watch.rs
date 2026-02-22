@@ -63,6 +63,11 @@ pub fn run_watch(config: &WatchConfig) -> Result<()> {
         .context("no running devcontainer found")?;
     let network = docker::get_container_network(&container_id)?;
 
+    // Clean up any orphaned watch sidecars from a previous watcher instance
+    if let Err(e) = docker::remove_port_forwards_by_source(&ws_id, "watch") {
+        eprintln!("Warning: failed to clean up old watch sidecars: {e}");
+    }
+
     println!(
         "Watching for listening ports (interval: {}s)...",
         config.interval

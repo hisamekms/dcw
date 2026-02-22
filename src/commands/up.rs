@@ -104,8 +104,8 @@ fn spawn_watcher() -> Result<()> {
 fn stop_watcher_if_running(pid_file: &PathBuf) {
     if let Ok(contents) = fs::read_to_string(pid_file) {
         if let Ok(pid) = contents.trim().parse::<i32>() {
-            unsafe {
-                libc::kill(pid, libc::SIGTERM);
+            if !crate::process::kill_dcw_process(pid) {
+                eprintln!("Warning: stale PID {pid} in watcher PID file (process not found or not dcw)");
             }
         }
         let _ = fs::remove_file(pid_file);
