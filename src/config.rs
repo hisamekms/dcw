@@ -45,6 +45,87 @@ pub fn deep_merge(base: &mut Value, overlay: Value) {
     }
 }
 
+/// Convert a relative path to absolute by joining it with `base`.
+/// If the path is already absolute, return it unchanged.
+fn make_absolute(path_str: &str, base: &Path) -> String {
+    let p = Path::new(path_str);
+    if p.is_absolute() {
+        path_str.to_string()
+    } else {
+        base.join(p).to_string_lossy().to_string()
+    }
+}
+
+/// Rewrite build-related relative paths in the merged config to absolute paths.
+///
+/// This is necessary because the merged config is written to a runtime directory
+/// (`/tmp/dcw-<uid>/<ws_id>/`), and the devcontainer CLI resolves relative paths
+/// from the config file location. Without this, Dockerfile-based builds would
+/// fail because the CLI cannot find the Dockerfile.
+fn resolve_build_paths(config: &mut Value, config_dir: &Path) {
+    let config_dir_str = config_dir.to_string_lossy().to_string();
+
+    // --- nested build.dockerfile / build.context ---
+    if let Some(build) = config.get_mut("build").and_then(|v| v.as_object_mut()) {
+        let has_dockerfile = build.contains_key("dockerfile");
+
+        if let Some(df) = build.get_mut("dockerfile") {
+            if let Some(s) = df.as_str().map(|s| s.to_string()) {
+                *df = Value::String(make_absolute(&s, config_dir));
+            }
+        }
+
+        if let Some(ctx) = build.get_mut("context") {
+            if let Some(s) = ctx.as_str().map(|s| s.to_string()) {
+                *ctx = Value::String(make_absolute(&s, config_dir));
+            }
+        } else if has_dockerfile {
+            build.insert("context".to_string(), Value::String(config_dir_str.clone()));
+        }
+    }
+
+    // --- top-level dockerFile / context ---
+    {
+        let has_docker_file = config
+            .as_object()
+            .is_some_and(|m| m.contains_key("dockerFile"));
+
+        if let Some(df) = config.get_mut("dockerFile") {
+            if let Some(s) = df.as_str().map(|s| s.to_string()) {
+                *df = Value::String(make_absolute(&s, config_dir));
+            }
+        }
+
+        if let Some(ctx) = config.get_mut("context") {
+            if let Some(s) = ctx.as_str().map(|s| s.to_string()) {
+                *ctx = Value::String(make_absolute(&s, config_dir));
+            }
+        } else if has_docker_file {
+            config
+                .as_object_mut()
+                .unwrap()
+                .insert("context".to_string(), Value::String(config_dir_str.clone()));
+        }
+    }
+
+    // --- dockerComposeFile (string or array) ---
+    if let Some(dcf) = config.get_mut("dockerComposeFile") {
+        match dcf {
+            Value::String(s) => {
+                *s = make_absolute(s, config_dir);
+            }
+            Value::Array(arr) => {
+                for item in arr.iter_mut() {
+                    if let Value::String(s) = item {
+                        *s = make_absolute(s, config_dir);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Resolve the devcontainer config for the workspace.
 ///
 /// If `.devcontainer/devcontainer.local.json` exists, merges it on top of
@@ -65,6 +146,7 @@ pub fn resolve_config(workspace_root: &Path) -> Result<Option<PathBuf>> {
     let overlay = read_jsonc(&local_path).context("failed to read devcontainer.local.json")?;
 
     deep_merge(&mut base, overlay);
+    resolve_build_paths(&mut base, &dc_dir);
 
     let runtime = workspace::runtime_dir()?;
     fs::create_dir_all(&runtime).context("failed to create runtime directory")?;
@@ -184,5 +266,179 @@ mod tests {
         assert_eq!(val["forwardPorts"], json!([3000]));
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ---- resolve_build_paths tests ----
+
+    #[test]
+    fn resolve_build_paths_nested_dockerfile_and_context() {
+        let base = Path::new("/workspace/.devcontainer");
+        let mut config = json!({
+            "build": {
+                "dockerfile": "Dockerfile",
+                "context": ".."
+            }
+        });
+        resolve_build_paths(&mut config, base);
+
+        assert_eq!(
+            config["build"]["dockerfile"],
+            "/workspace/.devcontainer/Dockerfile"
+        );
+        assert_eq!(config["build"]["context"], "/workspace/.devcontainer/..");
+    }
+
+    #[test]
+    fn resolve_build_paths_nested_dockerfile_without_context() {
+        let base = Path::new("/workspace/.devcontainer");
+        let mut config = json!({
+            "build": {
+                "dockerfile": "Dockerfile"
+            }
+        });
+        resolve_build_paths(&mut config, base);
+
+        assert_eq!(
+            config["build"]["dockerfile"],
+            "/workspace/.devcontainer/Dockerfile"
+        );
+        assert_eq!(
+            config["build"]["context"],
+            "/workspace/.devcontainer"
+        );
+    }
+
+    #[test]
+    fn resolve_build_paths_top_level_dockerfile_and_context() {
+        let base = Path::new("/workspace/.devcontainer");
+        let mut config = json!({
+            "dockerFile": "Dockerfile.dev",
+            "context": ".."
+        });
+        resolve_build_paths(&mut config, base);
+
+        assert_eq!(
+            config["dockerFile"],
+            "/workspace/.devcontainer/Dockerfile.dev"
+        );
+        assert_eq!(config["context"], "/workspace/.devcontainer/..");
+    }
+
+    #[test]
+    fn resolve_build_paths_top_level_dockerfile_without_context() {
+        let base = Path::new("/workspace/.devcontainer");
+        let mut config = json!({
+            "dockerFile": "Dockerfile"
+        });
+        resolve_build_paths(&mut config, base);
+
+        assert_eq!(
+            config["dockerFile"],
+            "/workspace/.devcontainer/Dockerfile"
+        );
+        assert_eq!(config["context"], "/workspace/.devcontainer");
+    }
+
+    #[test]
+    fn resolve_build_paths_absolute_paths_unchanged() {
+        let base = Path::new("/workspace/.devcontainer");
+        let mut config = json!({
+            "build": {
+                "dockerfile": "/opt/docker/Dockerfile",
+                "context": "/opt/docker"
+            }
+        });
+        resolve_build_paths(&mut config, base);
+
+        assert_eq!(config["build"]["dockerfile"], "/opt/docker/Dockerfile");
+        assert_eq!(config["build"]["context"], "/opt/docker");
+    }
+
+    #[test]
+    fn resolve_build_paths_docker_compose_string() {
+        let base = Path::new("/workspace/.devcontainer");
+        let mut config = json!({
+            "dockerComposeFile": "docker-compose.yml"
+        });
+        resolve_build_paths(&mut config, base);
+
+        assert_eq!(
+            config["dockerComposeFile"],
+            "/workspace/.devcontainer/docker-compose.yml"
+        );
+    }
+
+    #[test]
+    fn resolve_build_paths_docker_compose_array() {
+        let base = Path::new("/workspace/.devcontainer");
+        let mut config = json!({
+            "dockerComposeFile": [
+                "docker-compose.yml",
+                "/absolute/docker-compose.override.yml",
+                "../docker-compose.dev.yml"
+            ]
+        });
+        resolve_build_paths(&mut config, base);
+
+        let arr = config["dockerComposeFile"].as_array().unwrap();
+        assert_eq!(arr[0], "/workspace/.devcontainer/docker-compose.yml");
+        assert_eq!(arr[1], "/absolute/docker-compose.override.yml");
+        assert_eq!(
+            arr[2],
+            "/workspace/.devcontainer/../docker-compose.dev.yml"
+        );
+    }
+
+    #[test]
+    fn resolve_build_paths_no_build_fields_is_noop() {
+        let base = Path::new("/workspace/.devcontainer");
+        let mut config = json!({
+            "image": "mcr.microsoft.com/devcontainers/rust:1",
+            "forwardPorts": [3000]
+        });
+        let original = config.clone();
+        resolve_build_paths(&mut config, base);
+
+        assert_eq!(config, original);
+    }
+
+    #[test]
+    fn resolve_build_paths_build_without_dockerfile() {
+        let base = Path::new("/workspace/.devcontainer");
+        let mut config = json!({
+            "build": {
+                "args": {"VARIANT": "bullseye"}
+            }
+        });
+        resolve_build_paths(&mut config, base);
+
+        // context should NOT be added when dockerfile is absent
+        assert!(config["build"].get("context").is_none());
+        assert_eq!(config["build"]["args"]["VARIANT"], "bullseye");
+    }
+
+    #[test]
+    fn resolve_build_paths_both_nested_and_top_level() {
+        let base = Path::new("/workspace/.devcontainer");
+        let mut config = json!({
+            "build": {
+                "dockerfile": "Dockerfile",
+                "context": ".."
+            },
+            "dockerFile": "Dockerfile.alt",
+            "context": "../other"
+        });
+        resolve_build_paths(&mut config, base);
+
+        assert_eq!(
+            config["build"]["dockerfile"],
+            "/workspace/.devcontainer/Dockerfile"
+        );
+        assert_eq!(config["build"]["context"], "/workspace/.devcontainer/..");
+        assert_eq!(
+            config["dockerFile"],
+            "/workspace/.devcontainer/Dockerfile.alt"
+        );
+        assert_eq!(config["context"], "/workspace/.devcontainer/../other");
     }
 }
