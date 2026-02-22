@@ -2,6 +2,8 @@
 
 # dcw – Devcontainer Wrapper
 
+> **アルファ版**: 本プロジェクトはアルファ版です。API やコマンド体系に破壊的変更が入る可能性があります。
+
 `devcontainer` CLI をラップし、以下の機能を追加する Rust 製 CLI ツールです。
 
 - **動的ポートフォワーディング** — socat ベースの Docker sidecar コンテナでポートをホストに公開
@@ -207,6 +209,8 @@ dcw update --force
 1. devcontainer の Docker ネットワークに参加
 2. `-p 127.0.0.1:<port>:<port>` でホストポートを LISTEN
 3. socat 経由で devcontainer にトラフィックを転送
+
+> **注意**: devcontainer が複数の Docker ネットワークに接続されている場合、最初に見つかったネットワークが sidecar の通信に使用されます。
 
 sidecar は冪等です。既存のポートに対して `dcw port add` を実行すると、以前の sidecar が置き換えられます。
 

@@ -2,6 +2,8 @@
 
 # dcw – Devcontainer Wrapper
 
+> **Alpha**: This project is in alpha. APIs and command interfaces may introduce breaking changes without notice.
+
 A Rust CLI tool that wraps the `devcontainer` CLI and extends it with:
 
 - **Dynamic port forwarding** — socat-based Docker sidecar containers that publish ports from the devcontainer to the host
@@ -207,6 +209,8 @@ Port forwarding uses Docker sidecar containers running `alpine/socat`. Each forw
 1. Joins the devcontainer's Docker network
 2. Listens on the host port via `-p 127.0.0.1:<port>:<port>`
 3. Forwards traffic to the devcontainer via socat
+
+> **Note**: If the devcontainer is connected to multiple Docker networks, the first network found is used for sidecar communication.
 
 Sidecars are idempotent — running `dcw port add` for an existing port replaces the previous sidecar.
 
