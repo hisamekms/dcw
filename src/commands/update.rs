@@ -106,11 +106,13 @@ fn parse_tag_from_response(body: &str) -> Result<String> {
 }
 
 fn detect_target() -> Result<String> {
+    let os = cmd_output("uname", &["-s"])?;
     let arch = cmd_output("uname", &["-m"])?;
-    let target = match arch.as_str() {
-        "x86_64" => "x86_64-unknown-linux-gnu",
-        "aarch64" => "aarch64-unknown-linux-gnu",
-        other => bail!("unsupported architecture: {other}"),
+    let target = match (os.as_str(), arch.as_str()) {
+        ("Linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("Linux", "aarch64") => "aarch64-unknown-linux-gnu",
+        ("Darwin", "arm64") => "aarch64-apple-darwin",
+        _ => bail!("unsupported platform: {os}/{arch}"),
     };
     Ok(target.to_string())
 }
