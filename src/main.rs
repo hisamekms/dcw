@@ -6,7 +6,7 @@ mod workspace;
 use anyhow::Result;
 use clap::Parser;
 
-use commands::{exec, port, stop, up};
+use commands::{down, exec, port, up};
 
 #[derive(Parser)]
 #[command(name = "dcw", about = "Devcontainer CLI helper")]
@@ -14,7 +14,7 @@ enum Cli {
     /// Start the devcontainer
     Up(up::UpArgs),
     /// Stop the devcontainer
-    Stop,
+    Down,
     /// Execute a command inside the devcontainer
     Exec(exec::ExecArgs),
     /// Manage port forwards
@@ -29,7 +29,7 @@ fn main() -> Result<()> {
 
     match &cli {
         Cli::Up(args) => up::run(args),
-        Cli::Stop => stop::run(),
+        Cli::Down => down::run(),
         Cli::Exec(args) => exec::run(args),
         Cli::Port { action } => port::run(action),
     }
