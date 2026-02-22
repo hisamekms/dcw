@@ -1,7 +1,9 @@
 use anyhow::{bail, Context, Result};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::commands::watch;
 use crate::docker;
 use crate::forward_ports;
 use crate::workspace;
@@ -13,8 +15,12 @@ pub struct UpArgs {
     pub rebuild: bool,
 
     /// Automatically forward ports from devcontainer.json after start
-    #[arg(long)]
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub auto_forward: bool,
+
+    /// Watch for new listening ports and auto-forward them
+    #[arg(long)]
+    pub watch: bool,
 
     /// Extra arguments passed to `devcontainer up`
     #[arg(last = true)]
@@ -52,6 +58,15 @@ pub fn run(args: &UpArgs) -> Result<()> {
         auto_forward_ports(&workspace_folder)?;
     }
 
+    if args.watch {
+        let config = watch::WatchConfig {
+            interval: 2,
+            min_port: 1024,
+            exclude_ports: HashSet::new(),
+        };
+        watch::run_watch(&config)?;
+    }
+
     Ok(())
 }
 
@@ -73,7 +88,7 @@ fn auto_forward_ports(workspace_folder: &str) -> Result<()> {
     println!("Auto-forwarding ports: {:?}", ports);
     for port in &ports {
         if let Err(e) =
-            docker::start_port_forward(&ws_id, &container_id, *port, *port, &network, true)
+            docker::start_port_forward(&ws_id, &container_id, *port, *port, &network, true, None)
         {
             eprintln!("Warning: failed to forward port {port}: {e}");
         } else {

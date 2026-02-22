@@ -1,5 +1,7 @@
 use anyhow::{bail, Context, Result};
+use std::collections::HashSet;
 
+use crate::commands::watch;
 use crate::docker;
 use crate::workspace;
 
@@ -27,6 +29,18 @@ pub enum PortAction {
     /// List active port forwards
     #[command(alias = "ls")]
     List,
+    /// Watch for new listening ports and auto-forward them
+    Watch {
+        /// Polling interval in seconds
+        #[arg(short, long, default_value = "2")]
+        interval: u64,
+        /// Minimum port number to forward
+        #[arg(long, default_value = "1024")]
+        min_port: u16,
+        /// Ports to exclude from auto-forwarding
+        #[arg(short, long)]
+        exclude: Vec<u16>,
+    },
 }
 
 pub fn run(action: &PortAction) -> Result<()> {
@@ -51,6 +65,7 @@ pub fn run(action: &PortAction) -> Result<()> {
                 *container_port,
                 &network,
                 *detach,
+                None,
             )?;
             println!("Port forward active.");
         }
@@ -77,6 +92,18 @@ pub fn run(action: &PortAction) -> Result<()> {
                     println!("{:<30} {:>6}   {:>6}", fwd.name, fwd.host_port, fwd.container_port);
                 }
             }
+        }
+        PortAction::Watch {
+            interval,
+            min_port,
+            exclude,
+        } => {
+            let config = watch::WatchConfig {
+                interval: *interval,
+                min_port: *min_port,
+                exclude_ports: exclude.iter().copied().collect::<HashSet<u16>>(),
+            };
+            watch::run_watch(&config)?;
         }
     }
 
