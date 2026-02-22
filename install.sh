@@ -4,21 +4,31 @@ set -euo pipefail
 REPO="hisamekms/dcw"
 INSTALL_DIR="${DCW_INSTALL_DIR:-$HOME/.local/bin}"
 
-# Detect architecture
-ARCH="$(uname -m)"
-case "${ARCH}" in
-  x86_64)  TARGET="x86_64-unknown-linux-gnu" ;;
-  aarch64) TARGET="aarch64-unknown-linux-gnu" ;;
-  *)
-    echo "Error: unsupported architecture: ${ARCH}" >&2
-    exit 1
-    ;;
-esac
-
-# Detect OS
+# Detect OS and architecture
 OS="$(uname -s)"
+ARCH="$(uname -m)"
+
 case "${OS}" in
-  Linux) ;;
+  Linux)
+    case "${ARCH}" in
+      x86_64)  TARGET="x86_64-unknown-linux-gnu" ;;
+      aarch64) TARGET="aarch64-unknown-linux-gnu" ;;
+      *)
+        echo "Error: unsupported architecture: ${ARCH}" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  Darwin)
+    case "${ARCH}" in
+      x86_64)  TARGET="x86_64-apple-darwin" ;;
+      arm64)   TARGET="aarch64-apple-darwin" ;;
+      *)
+        echo "Error: unsupported architecture: ${ARCH}" >&2
+        exit 1
+        ;;
+    esac
+    ;;
   *)
     echo "Error: unsupported OS: ${OS}" >&2
     exit 1
