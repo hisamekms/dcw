@@ -1,7 +1,8 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::Value;
-use std::fs;
 use std::path::Path;
+
+use crate::config;
 
 /// Parse `forwardPorts` from a JSON value, supporting multiple formats:
 /// - Numbers: `3000`
@@ -29,49 +30,24 @@ pub fn parse_forward_ports_from_value(value: &Value) -> Vec<u16> {
         .collect()
 }
 
-/// Read a JSONC file (JSON with `//` line comments) and parse it.
-pub fn read_jsonc(path: &Path) -> Result<Value> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-
-    let stripped: String = content
-        .lines()
-        .map(|line| {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("//") {
-                ""
-            } else {
-                line
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    serde_json::from_str(&stripped)
-        .with_context(|| format!("failed to parse JSON from {}", path.display()))
-}
-
-/// Load forward ports from devcontainer.json, with optional override
-/// from devcontainer.local.json.
+/// Load forward ports from the resolved devcontainer config.
+///
+/// If a local override exists, uses the merged config; otherwise reads
+/// devcontainer.json directly.
 pub fn load_forward_ports(workspace_root: &Path) -> Result<Vec<u16>> {
-    let dc_dir = workspace_root.join(".devcontainer");
-
-    let local_path = dc_dir.join("devcontainer.local.json");
-    if local_path.exists() {
-        let value = read_jsonc(&local_path)?;
-        let ports = parse_forward_ports_from_value(&value);
-        if !ports.is_empty() {
-            return Ok(ports);
+    let config_path = match config::resolve_config(workspace_root)? {
+        Some(merged) => merged,
+        None => {
+            let main_path = workspace_root.join(".devcontainer/devcontainer.json");
+            if !main_path.exists() {
+                return Ok(Vec::new());
+            }
+            main_path
         }
-    }
+    };
 
-    let main_path = dc_dir.join("devcontainer.json");
-    if main_path.exists() {
-        let value = read_jsonc(&main_path)?;
-        return Ok(parse_forward_ports_from_value(&value));
-    }
-
-    Ok(Vec::new())
+    let value = config::read_jsonc(&config_path)?;
+    Ok(parse_forward_ports_from_value(&value))
 }
 
 #[cfg(test)]
@@ -107,28 +83,5 @@ mod tests {
     fn parse_missing_forward_ports() {
         let val = json!({"name": "test"});
         assert_eq!(parse_forward_ports_from_value(&val), Vec::<u16>::new());
-    }
-
-    #[test]
-    fn read_jsonc_strips_comments() {
-        let dir = std::env::temp_dir().join("dcw-test-jsonc");
-        let _ = fs::create_dir_all(&dir);
-        let path = dir.join("test.jsonc");
-        fs::write(
-            &path,
-            r#"
-// This is a comment
-{
-    // another comment
-    "forwardPorts": [3000]
-}
-"#,
-        )
-        .unwrap();
-
-        let val = read_jsonc(&path).unwrap();
-        assert_eq!(parse_forward_ports_from_value(&val), vec![3000]);
-
-        let _ = fs::remove_dir_all(&dir);
     }
 }

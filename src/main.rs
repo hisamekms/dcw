@@ -1,4 +1,5 @@
 mod commands;
+mod config;
 mod docker;
 mod forward_ports;
 mod workspace;

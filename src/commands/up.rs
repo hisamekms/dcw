@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use crate::config;
 use crate::docker;
 use crate::forward_ports;
 use crate::workspace;
@@ -29,11 +30,19 @@ pub struct UpArgs {
 pub fn run(args: &UpArgs) -> Result<()> {
     let workspace_folder = workspace::workspace_folder()?;
 
+    let workspace_root = PathBuf::from(&workspace_folder);
+    let merged_config = config::resolve_config(&workspace_root)?;
+
     let mut cmd_args = vec![
         "up".to_string(),
         "--workspace-folder".to_string(),
         workspace_folder.clone(),
     ];
+
+    if let Some(config_path) = &merged_config {
+        cmd_args.push("--config".to_string());
+        cmd_args.push(config_path.to_string_lossy().to_string());
+    }
 
     if args.rebuild {
         cmd_args.push("--remove-existing-container".to_string());
