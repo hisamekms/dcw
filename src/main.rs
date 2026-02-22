@@ -9,7 +9,7 @@ use clap::Parser;
 use commands::{port, up};
 
 #[derive(Parser)]
-#[command(name = "dc", about = "Devcontainer CLI helper")]
+#[command(name = "dcw", about = "Devcontainer CLI helper")]
 enum Cli {
     /// Start the devcontainer
     Up(up::UpArgs),

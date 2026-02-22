@@ -19,7 +19,7 @@ pub struct UpArgs {
     pub auto_forward: bool,
 
     /// Watch for new listening ports and auto-forward them
-    #[arg(long)]
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub watch: bool,
 
     /// Extra arguments passed to `devcontainer up`

@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn read_jsonc_strips_comments() {
-        let dir = std::env::temp_dir().join("dc-test-jsonc");
+        let dir = std::env::temp_dir().join("dcw-test-jsonc");
         let _ = fs::create_dir_all(&dir);
         let path = dir.join("test.jsonc");
         fs::write(

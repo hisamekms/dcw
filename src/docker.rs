@@ -145,19 +145,19 @@ pub fn start_port_forward(
         "--network".to_string(),
         network.to_string(),
         "--label".to_string(),
-        "dc.role=port-forward".to_string(),
+        "dcw.role=port-forward".to_string(),
         "--label".to_string(),
-        format!("dc.workspace={ws_id}"),
+        format!("dcw.workspace={ws_id}"),
         "--label".to_string(),
-        format!("dc.port={container_port}"),
+        format!("dcw.port={container_port}"),
         "--label".to_string(),
-        format!("dc.host_port={host_port}"),
+        format!("dcw.host_port={host_port}"),
     ];
 
     if let Some(src) = source {
         args.extend([
             "--label".to_string(),
-            format!("dc.source={src}"),
+            format!("dcw.source={src}"),
         ]);
     }
 
@@ -218,9 +218,9 @@ pub fn remove_all_port_forwards(ws_id: &str) -> Result<()> {
             "ps",
             "-q",
             "--filter",
-            "label=dc.role=port-forward",
+            "label=dcw.role=port-forward",
             "--filter",
-            &format!("label=dc.workspace={ws_id}"),
+            &format!("label=dcw.workspace={ws_id}"),
         ])
         .output()
         .context("failed to list port-forward sidecars")?;
@@ -242,11 +242,11 @@ pub fn remove_port_forwards_by_source(ws_id: &str, source: &str) -> Result<()> {
             "ps",
             "-q",
             "--filter",
-            "label=dc.role=port-forward",
+            "label=dcw.role=port-forward",
             "--filter",
-            &format!("label=dc.workspace={ws_id}"),
+            &format!("label=dcw.workspace={ws_id}"),
             "--filter",
-            &format!("label=dc.source={source}"),
+            &format!("label=dcw.source={source}"),
         ])
         .output()
         .context("failed to list port-forward sidecars by source")?;
@@ -274,11 +274,11 @@ pub fn list_port_forwards(ws_id: &str) -> Result<Vec<PortForwardInfo>> {
         .args([
             "ps",
             "--filter",
-            "label=dc.role=port-forward",
+            "label=dcw.role=port-forward",
             "--filter",
-            &format!("label=dc.workspace={ws_id}"),
+            &format!("label=dcw.workspace={ws_id}"),
             "--format",
-            "{{.Names}}\t{{.Label \"dc.host_port\"}}\t{{.Label \"dc.port\"}}",
+            "{{.Names}}\t{{.Label \"dcw.host_port\"}}\t{{.Label \"dcw.port\"}}",
         ])
         .output()
         .context("failed to list port-forward sidecars")?;
