@@ -1,11 +1,9 @@
 {
   "name": "Rust",
-  "image": "mcr.microsoft.com/devcontainers/rust:1",
-  "customizations": {
-    "vscode": {
-      "extensions": [
-        "rust-lang.rust-analyzer"
-      ]
-    }
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   }
 }
