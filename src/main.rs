@@ -7,7 +7,7 @@ mod workspace;
 use anyhow::Result;
 use clap::Parser;
 
-use commands::{down, exec, port, up};
+use commands::{down, exec, port, up, update};
 
 #[derive(Parser)]
 #[command(name = "dcw", about = "Devcontainer CLI helper")]
@@ -23,6 +23,8 @@ enum Cli {
         #[command(subcommand)]
         action: port::PortAction,
     },
+    /// Update dcw to the latest version
+    Update(update::UpdateArgs),
 }
 
 fn main() -> Result<()> {
@@ -33,5 +35,6 @@ fn main() -> Result<()> {
         Cli::Down => down::run(),
         Cli::Exec(args) => exec::run(args),
         Cli::Port { action } => port::run(action),
+        Cli::Update(args) => update::run(args),
     }
 }

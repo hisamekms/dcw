@@ -1,14 +1,34 @@
-# dc – Devcontainer CLI Helper
+# dcw – Devcontainer CLI Helper
 
 A Rust CLI tool that wraps `devcontainer up` and adds dynamic TCP port forwarding via Docker sidecar containers. This enables `forwardPorts` support without VS Code by launching socat-based sidecars that publish ports from the devcontainer to the host.
 
-## Build
+## Install
+
+**Quick install** (Linux x86_64 and aarch64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/hisamekms/dcw/main/install.sh | bash
+```
+
+**Override install directory:**
+
+```sh
+DCW_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/hisamekms/dcw/main/install.sh | bash
+```
+
+**Pin a specific version:**
+
+```sh
+VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/hisamekms/dcw/main/install.sh | bash
+```
+
+## Build from source
 
 ```sh
 cargo build --release
 ```
 
-The binary is produced at `target/release/dc`.
+The binary is produced at `target/release/dcw`.
 
 ## Usage
 
@@ -16,40 +36,40 @@ The binary is produced at `target/release/dc`.
 
 ```sh
 # Basic start
-dc up
+dcw up
 
 # Rebuild from scratch
-dc up --rebuild
+dcw up --rebuild
 
 # Start and auto-forward ports defined in devcontainer.json
-dc up --auto-forward
+dcw up --auto-forward
 
 # Pass extra arguments to devcontainer CLI
-dc up -- --config .devcontainer/custom.json
+dcw up -- --config .devcontainer/custom.json
 ```
 
 ### Manage port forwards
 
 ```sh
 # Forward host port 8080 to container port 8080 (detached)
-dc port add -d 8080 8080
+dcw port add -d 8080 8080
 
 # Forward with different host/container ports
-dc port add -d 3000 8080
+dcw port add -d 3000 8080
 
 # List active forwards
-dc port list
+dcw port list
 
 # Remove a specific forward
-dc port remove 8080
+dcw port remove 8080
 
 # Remove all forwards
-dc port remove --all
+dcw port remove --all
 ```
 
 ### `forwardPorts` in devcontainer.json
 
-`dc up --auto-forward` reads `forwardPorts` from `.devcontainer/devcontainer.json` (or `.devcontainer/devcontainer.local.json` as an override). Supported formats:
+`dcw up --auto-forward` reads `forwardPorts` from `.devcontainer/devcontainer.json` (or `.devcontainer/devcontainer.local.json` as an override). Supported formats:
 
 ```jsonc
 {
@@ -70,7 +90,7 @@ Port forwarding is implemented using Docker sidecar containers running `alpine/s
 2. Listens on the host port via `-p 127.0.0.1:<port>:<port>`
 3. Forwards traffic to the devcontainer via socat
 
-Sidecars are idempotent — running `dc port add` for an existing port replaces the previous sidecar.
+Sidecars are idempotent — running `dcw port add` for an existing port replaces the previous sidecar.
 
 ## Requirements
 
