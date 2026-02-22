@@ -64,9 +64,22 @@ pub fn run(args: &UpdateArgs) -> Result<()> {
     let current_exe =
         env::current_exe().context("failed to determine current executable path")?;
 
-    fs::copy(&new_binary, &current_exe)
-        .context("failed to replace binary — try with appropriate permissions")?;
-    fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755))?;
+    // Write to a temporary path then rename to atomically replace the binary.
+    // rename operates on directory entries (not inodes), so it avoids ETXTBSY
+    // errors that occur when overwriting a running executable on Linux.
+    let tmp_dest = current_exe.with_extension("tmp");
+    let replace_result = (|| -> Result<()> {
+        fs::copy(&new_binary, &tmp_dest)
+            .context("failed to write new binary to temporary path")?;
+        fs::set_permissions(&tmp_dest, fs::Permissions::from_mode(0o755))?;
+        fs::rename(&tmp_dest, &current_exe)
+            .context("failed to replace binary — try with appropriate permissions")?;
+        Ok(())
+    })();
+    if replace_result.is_err() {
+        let _ = fs::remove_file(&tmp_dest);
+    }
+    replace_result?;
 
     let _ = fs::remove_dir_all(&tmpdir);
 
