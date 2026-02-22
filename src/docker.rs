@@ -59,6 +59,33 @@ pub fn get_container_network(container_id: &str) -> Result<String> {
     Ok(network.split('\n').next().unwrap().to_string())
 }
 
+/// Get the IP address of a container on a given network.
+/// The default `bridge` network doesn't support container name/ID DNS resolution,
+/// so we need the actual IP for socat to connect to.
+pub fn get_container_ip(container_id: &str, network: &str) -> Result<String> {
+    let template = format!(
+        "{{{{.NetworkSettings.Networks.{network}.IPAddress}}}}"
+    );
+    let output = Command::new("docker")
+        .args(["inspect", "-f", &template, container_id])
+        .output()
+        .context("failed to run docker inspect for IP")?;
+
+    if !output.status.success() {
+        bail!(
+            "docker inspect failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if ip.is_empty() {
+        bail!("container {container_id} has no IP on network {network}");
+    }
+
+    Ok(ip)
+}
+
 /// Start a socat port-forwarding sidecar container.
 ///
 /// Sidecar naming: `pf-<ws_id>-c<container_port>`
@@ -91,6 +118,8 @@ pub fn start_port_forward(
         format!("dc.workspace={ws_id}"),
         "--label".to_string(),
         format!("dc.port={container_port}"),
+        "--label".to_string(),
+        format!("dc.host_port={host_port}"),
         "-p".to_string(),
         format!("127.0.0.1:{host_port}:{host_port}"),
     ];
@@ -99,10 +128,12 @@ pub fn start_port_forward(
         args.push("-d".to_string());
     }
 
+    let container_ip = get_container_ip(container_id, network)?;
+
     args.extend([
         "alpine/socat".to_string(),
         format!("TCP-LISTEN:{host_port},fork,reuseaddr"),
-        format!("TCP:{container_id}:{container_port}"),
+        format!("TCP:{container_ip}:{container_port}"),
     ]);
 
     let output = Command::new("docker")
@@ -162,9 +193,15 @@ pub fn remove_all_port_forwards(ws_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Info about an active port forward.
+pub struct PortForwardInfo {
+    pub name: String,
+    pub host_port: String,
+    pub container_port: String,
+}
+
 /// List active port-forwarding sidecars for a workspace.
-/// Returns a list of (sidecar_name, port) tuples.
-pub fn list_port_forwards(ws_id: &str) -> Result<Vec<(String, String)>> {
+pub fn list_port_forwards(ws_id: &str) -> Result<Vec<PortForwardInfo>> {
     let output = Command::new("docker")
         .args([
             "ps",
@@ -173,7 +210,7 @@ pub fn list_port_forwards(ws_id: &str) -> Result<Vec<(String, String)>> {
             "--filter",
             &format!("label=dc.workspace={ws_id}"),
             "--format",
-            "{{.Names}}\t{{.Label \"dc.port\"}}",
+            "{{.Names}}\t{{.Label \"dc.host_port\"}}\t{{.Label \"dc.port\"}}",
         ])
         .output()
         .context("failed to list port-forward sidecars")?;
@@ -192,9 +229,11 @@ pub fn list_port_forwards(ws_id: &str) -> Result<Vec<(String, String)>> {
         .filter(|line| !line.is_empty())
         .map(|line| {
             let parts: Vec<&str> = line.split('\t').collect();
-            let name = parts.first().unwrap_or(&"").to_string();
-            let port = parts.get(1).unwrap_or(&"").to_string();
-            (name, port)
+            PortForwardInfo {
+                name: parts.first().unwrap_or(&"").to_string(),
+                host_port: parts.get(1).unwrap_or(&"").to_string(),
+                container_port: parts.get(2).unwrap_or(&"").to_string(),
+            }
         })
         .collect();
 

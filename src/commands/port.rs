@@ -16,6 +16,7 @@ pub enum PortAction {
         detach: bool,
     },
     /// Remove a port forward
+    #[command(alias = "rm")]
     Remove {
         /// Container port to stop forwarding (omit if using --all)
         port: Option<u16>,
@@ -24,6 +25,7 @@ pub enum PortAction {
         all: bool,
     },
     /// List active port forwards
+    #[command(alias = "ls")]
     List,
 }
 
@@ -70,9 +72,9 @@ pub fn run(action: &PortAction) -> Result<()> {
             if forwards.is_empty() {
                 println!("No active port forwards.");
             } else {
-                println!("{:<30} {}", "SIDECAR", "PORT");
-                for (name, port) in &forwards {
-                    println!("{:<30} {}", name, port);
+                println!("{:<30} {:>6}   {:>6}", "SIDECAR", "HOST", "CONTAINER");
+                for fwd in &forwards {
+                    println!("{:<30} {:>6}   {:>6}", fwd.name, fwd.host_port, fwd.container_port);
                 }
             }
         }
