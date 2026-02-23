@@ -13,12 +13,17 @@ A Rust CLI tool that wraps the `devcontainer` CLI and extends it with:
 
 ## Typical Usage Pattern
 
-```
-1. dcw up                        # Start the devcontainer (watch enabled by default)
-2. (container) python -m http.server 8080   # A service starts listening on a port
-3. dcw detects port 8080 → creates sidecar  # Automatic port forwarding
-4. (host) curl localhost:8080               # Access from the host
-5. dcw down                      # Stop everything (watcher, sidecars, container)
+```sh
+$ dcw up                          # Start the devcontainer (watch enabled by default)
+
+# Inside the container, a service starts listening on a port
+$ dcw exec -- python -m http.server 8080 &
+# => dcw detects port 8080 and automatically forwards it to the host
+
+$ curl localhost:8080             # Access from the host
+# => 200 OK
+
+$ dcw down                        # Stop everything (watcher, sidecars, container)
 ```
 
 ## Install

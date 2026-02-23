@@ -13,12 +13,17 @@
 
 ## 典型的な使い方
 
-```
-1. dcw up                        # devcontainer を起動（watch はデフォルトで有効）
-2. (コンテナ) python -m http.server 8080   # コンテナ内でサービスがポートを LISTEN
-3. dcw がポート 8080 を検出 → sidecar を作成  # 自動ポートフォワーディング
-4. (ホスト) curl localhost:8080             # ホストからアクセス
-5. dcw down                      # すべて停止（watcher、sidecar、コンテナ）
+```sh
+$ dcw up                          # devcontainer を起動（watch はデフォルトで有効）
+
+# コンテナ内でサービスがポートを LISTEN
+$ dcw exec -- python -m http.server 8080 &
+# => dcw がポート 8080 を検出し、自動的にホストへフォワード
+
+$ curl localhost:8080             # ホストからアクセス
+# => 200 OK
+
+$ dcw down                        # すべて停止（watcher、sidecar、コンテナ）
 ```
 
 ## インストール
