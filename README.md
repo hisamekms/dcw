@@ -10,11 +10,20 @@ A Rust CLI tool that wraps the `devcontainer` CLI and extends it with:
 - **Automatic port watching** — detects new listening ports inside the container and forwards them automatically
 - **Config merging** — deep-merges `devcontainer.local.json` on top of `devcontainer.json`
 - **Lifecycle management** — `up` / `exec` / `down` for the full devcontainer lifecycle
-- **Self-update** — update the binary from GitHub Releases
+
+## Typical Usage Pattern
+
+```
+1. dcw up                        # Start the devcontainer (watch enabled by default)
+2. (container) python -m http.server 8080   # A service starts listening on a port
+3. dcw detects port 8080 → creates sidecar  # Automatic port forwarding
+4. (host) curl localhost:8080               # Access from the host
+5. dcw down                      # Stop everything (watcher, sidecars, container)
+```
 
 ## Install
 
-**Quick install** (Linux x86_64 and aarch64):
+**Quick install** (Linux x86_64/aarch64, macOS Apple Silicon):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hisamekms/dcw/main/install.sh | bash

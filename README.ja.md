@@ -10,11 +10,20 @@
 - **ポート自動監視** — コンテナ内の新しい LISTEN ポートを検出し、自動的にフォワード
 - **設定マージ** — `devcontainer.local.json` を `devcontainer.json` に deep merge
 - **ライフサイクル管理** — `up` / `exec` / `down` による devcontainer の操作
-- **セルフアップデート** — GitHub Releases からバイナリを更新
+
+## 典型的な使い方
+
+```
+1. dcw up                        # devcontainer を起動（watch はデフォルトで有効）
+2. (コンテナ) python -m http.server 8080   # コンテナ内でサービスがポートを LISTEN
+3. dcw がポート 8080 を検出 → sidecar を作成  # 自動ポートフォワーディング
+4. (ホスト) curl localhost:8080             # ホストからアクセス
+5. dcw down                      # すべて停止（watcher、sidecar、コンテナ）
+```
 
 ## インストール
 
-**クイックインストール** (Linux x86_64 / aarch64):
+**クイックインストール** (Linux x86_64/aarch64, macOS Apple Silicon):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hisamekms/dcw/main/install.sh | bash
