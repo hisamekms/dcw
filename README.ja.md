@@ -238,7 +238,28 @@ watcher の PID は XDG ランタイムディレクトリに保存され、`dcw 
 
 `.devcontainer/devcontainer.local.json` が存在する場合、`dcw up` は `devcontainer.json` に deep merge し、結果を XDG ランタイムディレクトリ（`$XDG_RUNTIME_DIR/dcw/<workspace>/devcontainer.merged.json`）に書き出します。このマージ済み設定は `devcontainer up` および `devcontainer exec` に `--config` フラグ経由で渡されます。
 
+## Podman での利用
+
+dcw は環境変数 `DCW_DOCKER_PATH` と `DCW_DOCKER_COMPOSE_PATH` を通じて、Podman などの Docker 互換ランタイムに対応しています。これらは `devcontainer` CLI の `--docker-path` および `--docker-compose-path` として渡されます。
+
+```sh
+# docker の代わりに podman を使用
+export DCW_DOCKER_PATH=podman
+export DCW_DOCKER_COMPOSE_PATH=podman-compose
+dcw up
+```
+
+絶対パスでの指定も可能です:
+
+```sh
+export DCW_DOCKER_PATH=/usr/bin/podman
+export DCW_DOCKER_COMPOSE_PATH=/usr/bin/podman-compose
+dcw up
+```
+
+これらの環境変数が設定されている場合、dcw はすべての Docker 操作（コンテナ管理、sidecar 作成など）に指定された実行ファイルを使用し、`devcontainer` CLI の `up` および `exec` コマンドにも渡します。
+
 ## 必要なもの
 
 - [devcontainer CLI](https://github.com/devcontainers/cli) (`npm install -g @devcontainers/cli`)
-- Docker
+- Docker（または Podman などの互換ランタイム）

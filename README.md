@@ -238,7 +238,28 @@ The watcher PID is stored in the XDG runtime directory so that `dcw down` can st
 
 If `.devcontainer/devcontainer.local.json` exists, `dcw up` deep-merges it on top of `devcontainer.json` and writes the result to the XDG runtime directory (`$XDG_RUNTIME_DIR/dcw/<workspace>/devcontainer.merged.json`). This merged config is then passed to `devcontainer up` and `devcontainer exec` via the `--config` flag.
 
+## Using with Podman
+
+dcw supports Podman (or other Docker-compatible runtimes) via the `DCW_DOCKER_PATH` and `DCW_DOCKER_COMPOSE_PATH` environment variables. These are passed to the `devcontainer` CLI as `--docker-path` and `--docker-compose-path`.
+
+```sh
+# Use podman instead of docker
+export DCW_DOCKER_PATH=podman
+export DCW_DOCKER_COMPOSE_PATH=podman-compose
+dcw up
+```
+
+You can also specify absolute paths:
+
+```sh
+export DCW_DOCKER_PATH=/usr/bin/podman
+export DCW_DOCKER_COMPOSE_PATH=/usr/bin/podman-compose
+dcw up
+```
+
+When these environment variables are set, dcw uses the specified executables for all Docker operations (container management, sidecar creation, etc.) and passes them to the `devcontainer` CLI for `up` and `exec` commands.
+
 ## Requirements
 
 - [devcontainer CLI](https://github.com/devcontainers/cli) (`npm install -g @devcontainers/cli`)
-- Docker
+- Docker (or a compatible runtime such as Podman)
