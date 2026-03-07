@@ -1,12 +1,25 @@
 use anyhow::{bail, Context, Result};
+use std::env;
 use std::process::Command;
+
+/// Return the docker executable path.
+/// Uses `DCW_DOCKER_PATH` if set, otherwise defaults to `"docker"`.
+pub fn docker_path() -> String {
+    env::var("DCW_DOCKER_PATH").unwrap_or_else(|_| "docker".to_string())
+}
+
+/// Return the docker-compose executable path.
+/// Uses `DCW_DOCKER_COMPOSE_PATH` if set, otherwise defaults to `"docker-compose"`.
+pub fn docker_compose_path() -> String {
+    env::var("DCW_DOCKER_COMPOSE_PATH").unwrap_or_else(|_| "docker-compose".to_string())
+}
 
 /// Execute a command inside a running container and return stdout.
 pub fn exec_in_container(container_id: &str, cmd: &[&str]) -> Result<String> {
     let mut args = vec!["exec", container_id];
     args.extend(cmd);
 
-    let output = Command::new("docker")
+    let output = Command::new(docker_path())
         .args(&args)
         .output()
         .context("failed to run docker exec")?;
@@ -23,7 +36,7 @@ pub fn exec_in_container(container_id: &str, cmd: &[&str]) -> Result<String> {
 
 /// Check if a container is still running.
 pub fn is_container_running(container_id: &str) -> Result<bool> {
-    let output = Command::new("docker")
+    let output = Command::new(docker_path())
         .args(["inspect", "-f", "{{.State.Running}}", container_id])
         .output()
         .context("failed to run docker inspect")?;
@@ -35,7 +48,7 @@ pub fn is_container_running(container_id: &str) -> Result<bool> {
 /// Find a running devcontainer for the given workspace folder.
 /// Returns the container ID if found.
 pub fn find_devcontainer(workspace_folder: &str) -> Result<Option<String>> {
-    let output = Command::new("docker")
+    let output = Command::new(docker_path())
         .args([
             "ps",
             "-q",
@@ -76,7 +89,7 @@ fn network_ip_template(network: &str) -> String {
 
 /// Get the network name for a container.
 pub fn get_container_network(container_id: &str) -> Result<String> {
-    let output = Command::new("docker")
+    let output = Command::new(docker_path())
         .args([
             "inspect",
             "-f",
@@ -107,7 +120,7 @@ pub fn get_container_network(container_id: &str) -> Result<String> {
 /// so we need the actual IP for socat to connect to.
 pub fn get_container_ip(container_id: &str, network: &str) -> Result<String> {
     let template = network_ip_template(network);
-    let output = Command::new("docker")
+    let output = Command::new(docker_path())
         .args(["inspect", "-f", &template, container_id])
         .output()
         .context("failed to run docker inspect for IP")?;
@@ -143,7 +156,7 @@ pub fn start_port_forward(
     let sidecar_name = format!("pf-{ws_id}-c{container_port}");
 
     // Remove existing sidecar if present (ignore errors)
-    let _ = Command::new("docker")
+    let _ = Command::new(docker_path())
         .args(["rm", "-f", &sidecar_name])
         .output();
 
@@ -188,7 +201,7 @@ pub fn start_port_forward(
         format!("TCP:{container_ip}:{container_port}"),
     ]);
 
-    let output = Command::new("docker")
+    let output = Command::new(docker_path())
         .args(&args)
         .output()
         .context("failed to run docker run for port forward")?;
@@ -206,7 +219,7 @@ pub fn start_port_forward(
 /// Remove a specific port-forwarding sidecar.
 pub fn remove_port_forward(ws_id: &str, port: u16) -> Result<()> {
     let sidecar_name = format!("pf-{ws_id}-c{port}");
-    let output = Command::new("docker")
+    let output = Command::new(docker_path())
         .args(["rm", "-f", &sidecar_name])
         .output()
         .context("failed to run docker rm")?;
@@ -223,7 +236,7 @@ pub fn remove_port_forward(ws_id: &str, port: u16) -> Result<()> {
 
 /// Remove all port-forwarding sidecars for a workspace.
 pub fn remove_all_port_forwards(ws_id: &str) -> Result<()> {
-    let output = Command::new("docker")
+    let output = Command::new(docker_path())
         .args([
             "ps",
             "-q",
@@ -238,7 +251,7 @@ pub fn remove_all_port_forwards(ws_id: &str) -> Result<()> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     for id in stdout.trim().lines() {
         if !id.is_empty() {
-            let _ = Command::new("docker").args(["rm", "-f", id]).output();
+            let _ = Command::new(docker_path()).args(["rm", "-f", id]).output();
         }
     }
 
@@ -247,7 +260,7 @@ pub fn remove_all_port_forwards(ws_id: &str) -> Result<()> {
 
 /// Remove all port-forwarding sidecars with a given source label.
 pub fn remove_port_forwards_by_source(ws_id: &str, source: &str) -> Result<()> {
-    let output = Command::new("docker")
+    let output = Command::new(docker_path())
         .args([
             "ps",
             "-q",
@@ -264,7 +277,7 @@ pub fn remove_port_forwards_by_source(ws_id: &str, source: &str) -> Result<()> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     for id in stdout.trim().lines() {
         if !id.is_empty() {
-            let _ = Command::new("docker").args(["rm", "-f", id]).output();
+            let _ = Command::new(docker_path()).args(["rm", "-f", id]).output();
         }
     }
 
@@ -280,7 +293,7 @@ pub struct PortForwardInfo {
 
 /// List active port-forwarding sidecars for a workspace.
 pub fn list_port_forwards(ws_id: &str) -> Result<Vec<PortForwardInfo>> {
-    let output = Command::new("docker")
+    let output = Command::new(docker_path())
         .args([
             "ps",
             "--filter",

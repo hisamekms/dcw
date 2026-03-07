@@ -28,6 +28,15 @@ pub fn run(args: &ExecArgs) -> Result<()> {
         cmd_args.push(config_path.to_string_lossy().to_string());
     }
 
+    if std::env::var("DCW_DOCKER_PATH").is_ok() {
+        cmd_args.push("--docker-path".to_string());
+        cmd_args.push(crate::docker::docker_path());
+    }
+    if std::env::var("DCW_DOCKER_COMPOSE_PATH").is_ok() {
+        cmd_args.push("--docker-compose-path".to_string());
+        cmd_args.push(crate::docker::docker_compose_path());
+    }
+
     cmd_args.extend(args.cmd.clone());
 
     let status = Command::new("devcontainer")

@@ -48,6 +48,15 @@ pub fn run(args: &UpArgs) -> Result<()> {
         cmd_args.push("--remove-existing-container".to_string());
     }
 
+    if std::env::var("DCW_DOCKER_PATH").is_ok() {
+        cmd_args.push("--docker-path".to_string());
+        cmd_args.push(docker::docker_path());
+    }
+    if std::env::var("DCW_DOCKER_COMPOSE_PATH").is_ok() {
+        cmd_args.push("--docker-compose-path".to_string());
+        cmd_args.push(docker::docker_compose_path());
+    }
+
     cmd_args.extend(args.extra.clone());
 
     println!("Starting devcontainer...");

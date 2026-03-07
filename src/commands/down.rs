@@ -19,7 +19,7 @@ pub fn run() -> Result<()> {
     match docker::find_devcontainer(&workspace_folder)? {
         Some(container_id) => {
             println!("Stopping container {container_id}...");
-            let output = std::process::Command::new("docker")
+            let output = std::process::Command::new(crate::docker::docker_path())
                 .args(["stop", &container_id])
                 .status()
                 .context("failed to run docker stop")?;
