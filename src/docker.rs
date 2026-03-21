@@ -1,17 +1,18 @@
 use anyhow::{bail, Context, Result};
-use std::env;
 use std::process::Command;
 
+use crate::settings::Settings;
+
 /// Return the docker executable path.
-/// Uses `DCW_DOCKER_PATH` if set, otherwise defaults to `"docker"`.
+/// Resolved via Settings (env var > config.toml > default).
 pub fn docker_path() -> String {
-    env::var("DCW_DOCKER_PATH").unwrap_or_else(|_| "docker".to_string())
+    Settings::get().docker.path.clone()
 }
 
 /// Return the docker-compose executable path.
-/// Uses `DCW_DOCKER_COMPOSE_PATH` if set, otherwise defaults to `"docker-compose"`.
+/// Resolved via Settings (env var > config.toml > default).
 pub fn docker_compose_path() -> String {
-    env::var("DCW_DOCKER_COMPOSE_PATH").unwrap_or_else(|_| "docker-compose".to_string())
+    Settings::get().docker.compose_path.clone()
 }
 
 /// Execute a command inside a running container and return stdout.

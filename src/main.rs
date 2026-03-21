@@ -4,6 +4,7 @@ mod config;
 mod docker;
 mod forward_ports;
 mod process;
+mod settings;
 mod workspace;
 
 use anyhow::Result;
