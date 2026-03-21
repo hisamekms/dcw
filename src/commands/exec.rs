@@ -4,6 +4,7 @@ use std::process::Command;
 
 use crate::commands::browser_relay;
 use crate::config;
+use crate::settings::Settings;
 use crate::workspace;
 
 #[derive(clap::Args)]
@@ -29,13 +30,14 @@ pub fn run(args: &ExecArgs) -> Result<()> {
         cmd_args.push(config_path.to_string_lossy().to_string());
     }
 
-    if std::env::var("DCW_DOCKER_PATH").is_ok() {
+    let settings = Settings::get();
+    if settings.docker.path != "docker" {
         cmd_args.push("--docker-path".to_string());
-        cmd_args.push(crate::docker::docker_path());
+        cmd_args.push(settings.docker.path.clone());
     }
-    if std::env::var("DCW_DOCKER_COMPOSE_PATH").is_ok() {
+    if settings.docker.compose_path != "docker-compose" {
         cmd_args.push("--docker-compose-path".to_string());
-        cmd_args.push(crate::docker::docker_compose_path());
+        cmd_args.push(settings.docker.compose_path.clone());
     }
 
     // Start relay in-process so cmux child processes inherit our process tree
@@ -68,10 +70,8 @@ pub fn run(args: &ExecArgs) -> Result<()> {
 /// Determine the relay hostname based on the Docker runtime in use.
 /// Podman uses `host.containers.internal`, Docker uses `host.docker.internal`.
 fn relay_host() -> &'static str {
-    if let Ok(path) = std::env::var("DCW_DOCKER_PATH") {
-        if path.contains("podman") {
-            return "host.containers.internal";
-        }
+    if Settings::get().docker.path.contains("podman") {
+        return "host.containers.internal";
     }
     "host.docker.internal"
 }

@@ -7,6 +7,7 @@ use crate::commands::browser_relay;
 use crate::config;
 use crate::docker;
 use crate::forward_ports;
+use crate::settings::Settings;
 use crate::workspace;
 
 #[derive(clap::Args)]
@@ -49,13 +50,14 @@ pub fn run(args: &UpArgs) -> Result<()> {
         cmd_args.push("--remove-existing-container".to_string());
     }
 
-    if std::env::var("DCW_DOCKER_PATH").is_ok() {
+    let settings = Settings::get();
+    if settings.docker.path != "docker" {
         cmd_args.push("--docker-path".to_string());
-        cmd_args.push(docker::docker_path());
+        cmd_args.push(settings.docker.path.clone());
     }
-    if std::env::var("DCW_DOCKER_COMPOSE_PATH").is_ok() {
+    if settings.docker.compose_path != "docker-compose" {
         cmd_args.push("--docker-compose-path".to_string());
-        cmd_args.push(docker::docker_compose_path());
+        cmd_args.push(settings.docker.compose_path.clone());
     }
 
     cmd_args.extend(args.extra.clone());
@@ -81,9 +83,11 @@ pub fn run(args: &UpArgs) -> Result<()> {
     }
 
     // Start browser relay if not already running (non-fatal)
-    match browser_relay::ensure_relay_running() {
-        Ok(_) => println!("Browser relay ready."),
-        Err(e) => eprintln!("Warning: failed to start browser relay: {e}"),
+    if settings.relay.browser.enabled {
+        match browser_relay::ensure_relay_running() {
+            Ok(_) => println!("Browser relay ready."),
+            Err(e) => eprintln!("Warning: failed to start browser relay: {e}"),
+        }
     }
 
     Ok(())
