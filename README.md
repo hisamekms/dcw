@@ -10,6 +10,7 @@ A Rust CLI tool that wraps the `devcontainer` CLI and extends it with:
 - **Automatic port watching** — detects new listening ports inside the container and forwards them automatically
 - **Config merging** — deep-merges `devcontainer.local.json` on top of `devcontainer.json`
 - **Lifecycle management** — `up` / `exec` / `down` for the full devcontainer lifecycle
+- **Browser relay** — token-authenticated HTTP relay to open URLs in the host browser from inside the container
 
 ## Typical Usage Pattern
 
@@ -237,6 +238,27 @@ The watcher PID is stored in the XDG runtime directory so that `dcw down` can st
 ### Config file merging
 
 If `.devcontainer/devcontainer.local.json` exists, `dcw up` deep-merges it on top of `devcontainer.json` and writes the result to the XDG runtime directory (`$XDG_RUNTIME_DIR/dcw/<workspace>/devcontainer.merged.json`). This merged config is then passed to `devcontainer up` and `devcontainer exec` via the `--config` flag.
+
+### Browser relay
+
+`dcw up` automatically starts a browser relay server on the host (port 19280). This allows processes inside the devcontainer to open URLs in the host's default browser by sending an HTTP request to the relay.
+
+The relay is token-authenticated — a random token is generated on each start and stored in the shared runtime directory. The relay only accepts `POST /open` requests with a valid `Authorization: Bearer <token>` header and an `http://` or `https://` URL in the JSON body.
+
+**Lifecycle:**
+
+- Started automatically by `dcw up` (non-fatal if it fails)
+- Shared across workspaces — a single relay serves all devcontainers
+- Stopped by `dcw down` only when no other devcontainers are running
+
+**Example request from inside the container:**
+
+```sh
+curl -X POST http://host.docker.internal:19280/open \
+  -H "Authorization: Bearer $BROWSER_RELAY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+```
 
 ## Using with Podman
 

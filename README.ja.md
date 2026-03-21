@@ -10,6 +10,7 @@
 - **ポート自動監視** — コンテナ内の新しい LISTEN ポートを検出し、自動的にフォワード
 - **設定マージ** — `devcontainer.local.json` を `devcontainer.json` に deep merge
 - **ライフサイクル管理** — `up` / `exec` / `down` による devcontainer の操作
+- **ブラウザリレー** — トークン認証付き HTTP リレーでコンテナ内からホストのブラウザで URL を開く
 
 ## 典型的な使い方
 
@@ -237,6 +238,27 @@ watcher の PID は XDG ランタイムディレクトリに保存され、`dcw 
 ### 設定ファイルのマージ
 
 `.devcontainer/devcontainer.local.json` が存在する場合、`dcw up` は `devcontainer.json` に deep merge し、結果を XDG ランタイムディレクトリ（`$XDG_RUNTIME_DIR/dcw/<workspace>/devcontainer.merged.json`）に書き出します。このマージ済み設定は `devcontainer up` および `devcontainer exec` に `--config` フラグ経由で渡されます。
+
+### ブラウザリレー
+
+`dcw up` はホスト上にブラウザリレーサーバー（ポート 19280）を自動的に起動します。これにより、devcontainer 内のプロセスがリレーに HTTP リクエストを送信することで、ホストのデフォルトブラウザで URL を開くことができます。
+
+リレーはトークン認証で保護されています。起動時にランダムなトークンが生成され、共有ランタイムディレクトリに保存されます。リレーは有効な `Authorization: Bearer <token>` ヘッダーと、`http://` または `https://` の URL を含む JSON ボディを持つ `POST /open` リクエストのみを受け付けます。
+
+**ライフサイクル:**
+
+- `dcw up` により自動的に起動（失敗しても致命的エラーにはならない）
+- ワークスペース間で共有 — 単一のリレーがすべての devcontainer に対応
+- `dcw down` 時、他に実行中の devcontainer がない場合のみ停止
+
+**コンテナ内からのリクエスト例:**
+
+```sh
+curl -X POST http://host.docker.internal:19280/open \
+  -H "Authorization: Bearer $BROWSER_RELAY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+```
 
 ## Podman での利用
 
