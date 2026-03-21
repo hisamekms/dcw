@@ -38,7 +38,7 @@ pub fn run(args: &ExecArgs) -> Result<()> {
         cmd_args.push(crate::docker::docker_compose_path());
     }
 
-    cmd_args.extend(build_browser_wrapped_cmd(&args.cmd));
+    cmd_args.extend(build_relay_wrapped_cmd(&args.cmd));
 
     let status = Command::new("devcontainer")
         .args(&cmd_args)
@@ -63,28 +63,98 @@ fn relay_host() -> &'static str {
     "host.docker.internal"
 }
 
-/// Wrap the user's command to inject BROWSER and DCW_BROWSER_TOKEN env vars.
+/// Collect CMUX_* environment variables from the host for forwarding into the container.
+fn collect_cmux_env() -> Vec<(String, String)> {
+    const CMUX_VARS: &[&str] = &[
+        "CMUX_WORKSPACE_ID",
+        "CMUX_SURFACE_ID",
+        "CMUX_TAB_ID",
+        "CMUX_SOCKET_PATH",
+        "CMUX_SOCKET_PASSWORD",
+    ];
+    CMUX_VARS
+        .iter()
+        .filter_map(|&name| std::env::var(name).ok().map(|val| (name.to_string(), val)))
+        .collect()
+}
+
+/// Wrap the user's command to inject BROWSER stub, cmux stub, and relay env vars.
 /// If the relay token file does not exist, returns the original command unchanged.
-fn build_browser_wrapped_cmd(cmd: &[String]) -> Vec<String> {
+fn build_relay_wrapped_cmd(cmd: &[String]) -> Vec<String> {
     let token = match fs::read_to_string(workspace::relay_token_file()) {
         Ok(t) if !t.trim().is_empty() => t.trim().to_string(),
         _ => return cmd.to_vec(),
     };
 
     let host = relay_host();
+    let cmux_env = collect_cmux_env();
+
+    // Build CMUX_* export statements for the wrapper
+    let cmux_exports: String = cmux_env
+        .iter()
+        .map(|(k, v)| format!("export {k}='{v}'; "))
+        .collect();
+
+    // Build the cmux stub script content.
+    // The stub collects all args into a JSON array, includes CMUX_* env vars,
+    // POSTs to the relay, and handles stdout/stderr/exit_code from the response.
+    let cmux_stub = concat!(
+        r#"#!/bin/sh"#, "\n",
+        r#"_json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g;s/"/\\"/g;s/\t/\\t/g' | tr '\n' ' '; }"#, "\n",
+        r#"_args=''"#, "\n",
+        r#"_first=1"#, "\n",
+        r#"for _a in "$@"; do"#, "\n",
+        r#"  _ea=$(_json_escape "$_a")"#, "\n",
+        r#"  if [ "$_first" = 1 ]; then _args="\"$_ea\""; _first=0; else _args="$_args,\"$_ea\""; fi"#, "\n",
+        r#"done"#, "\n",
+        r#"_env=''"#, "\n",
+        r#"_efirst=1"#, "\n",
+        r#"for _var in CMUX_WORKSPACE_ID CMUX_SURFACE_ID CMUX_TAB_ID CMUX_SOCKET_PATH CMUX_SOCKET_PASSWORD; do"#, "\n",
+        r#"  eval _val=\${$_var:-}"#, "\n",
+        r#"  if [ -n "$_val" ]; then"#, "\n",
+        r#"    _ev=$(_json_escape "$_val")"#, "\n",
+        r#"    if [ "$_efirst" = 1 ]; then _env="\"$_var\":\"$_ev\""; _efirst=0; else _env="$_env,\"$_var\":\"$_ev\""; fi"#, "\n",
+        r#"  fi"#, "\n",
+        r#"done"#, "\n",
+        r#"_body="{\"args\":[$_args],\"env\":{$_env}}""#, "\n",
+        r#"_resp=$(curl -sf -X POST \"#, "\n",
+        r#"  -H "Authorization: Bearer $DCW_BROWSER_TOKEN" \"#, "\n",
+        r#"  -H "Content-Type: application/json" \"#, "\n",
+        r#"  -d "$_body" \"#, "\n",
+        r#"  "http://$DCW_RELAY_HOST:19280/cmux" 2>/dev/null)"#, "\n",
+        r#"if [ $? -ne 0 ] || [ -z "$_resp" ]; then"#, "\n",
+        r#"  echo "cmux relay: connection failed" >&2; exit 1"#, "\n",
+        r#"fi"#, "\n",
+        r#"# Extract base64 fields and exit_code from JSON response"#, "\n",
+        r#"_stdout_b64=$(printf '%s' "$_resp" | sed -n 's/.*"stdout_b64":"\([^"]*\)".*/\1/p')"#, "\n",
+        r#"_stderr_b64=$(printf '%s' "$_resp" | sed -n 's/.*"stderr_b64":"\([^"]*\)".*/\1/p')"#, "\n",
+        r#"_exit=$(printf '%s' "$_resp" | sed -n 's/.*"exit_code":\([0-9-]*\).*/\1/p')"#, "\n",
+        r#"[ -n "$_stdout_b64" ] && printf '%s' "$_stdout_b64" | base64 -d"#, "\n",
+        r#"[ -n "$_stderr_b64" ] && printf '%s' "$_stderr_b64" | base64 -d >&2"#, "\n",
+        r#"exit "${_exit:-1}""#, "\n",
+    );
 
     let wrapper_script = format!(
         concat!(
             r#"export DCW_BROWSER_TOKEN='{token}'; "#,
             r#"export DCW_RELAY_HOST='{host}'; "#,
+            r#"{cmux_exports}"#,
             r#"_dcw_b=$(mktemp); "#,
             r#"printf '%s\n' '#!/bin/sh' 'curl -sf -X POST -H "Authorization: Bearer $DCW_BROWSER_TOKEN" -H "Content-Type: application/json" -d "{{\"url\":\"$1\"}}" http://$DCW_RELAY_HOST:19280/open >/dev/null 2>&1' > "$_dcw_b"; "#,
             r#"chmod +x "$_dcw_b"; "#,
             r#"export BROWSER="$_dcw_b"; "#,
+            r#"_dcw_bin=$(mktemp -d); "#,
+            r#"cat > "$_dcw_bin/cmux" << 'CMUX_STUB_EOF'"#, "\n",
+            r#"{cmux_stub}"#,
+            r#"CMUX_STUB_EOF"#, "\n",
+            r#"chmod +x "$_dcw_bin/cmux"; "#,
+            r#"export PATH="$_dcw_bin:$PATH"; "#,
             r#"exec "$@""#,
         ),
         token = token,
         host = host,
+        cmux_exports = cmux_exports,
+        cmux_stub = cmux_stub,
     );
 
     let mut wrapped = vec![

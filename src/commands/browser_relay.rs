@@ -60,8 +60,8 @@ fn handle_request(mut request: tiny_http::Request, expected_token: &str) {
         return;
     }
 
-    // Check method and path
-    if request.method() != &tiny_http::Method::Post || request.url() != "/open" {
+    // Check method
+    if request.method() != &tiny_http::Method::Post {
         let _ = request.respond(tiny_http::Response::from_string("Not Found").with_status_code(404));
         return;
     }
@@ -73,8 +73,18 @@ fn handle_request(mut request: tiny_http::Request, expected_token: &str) {
         return;
     }
 
+    match request.url() {
+        "/open" => handle_open(request, &body),
+        "/cmux" => handle_cmux(request, &body),
+        _ => {
+            let _ = request.respond(tiny_http::Response::from_string("Not Found").with_status_code(404));
+        }
+    }
+}
+
+fn handle_open(request: tiny_http::Request, body: &str) {
     // Parse JSON
-    let url = match serde_json::from_str::<serde_json::Value>(&body) {
+    let url = match serde_json::from_str::<serde_json::Value>(body) {
         Ok(val) => match val.get("url").and_then(|v| v.as_str()) {
             Some(u) => u.to_string(),
             None => {
@@ -114,6 +124,80 @@ fn handle_request(mut request: tiny_http::Request, expected_token: &str) {
             );
         }
     }
+}
+
+fn handle_cmux(request: tiny_http::Request, body: &str) {
+    // Parse JSON: { "args": [...], "env": { "KEY": "val", ... } }
+    let val: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(_) => {
+            let _ = request.respond(
+                tiny_http::Response::from_string("Invalid JSON").with_status_code(400),
+            );
+            return;
+        }
+    };
+
+    let args: Vec<String> = match val.get("args").and_then(|v| v.as_array()) {
+        Some(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect(),
+        None => {
+            let _ = request.respond(
+                tiny_http::Response::from_string("Missing 'args' array").with_status_code(400),
+            );
+            return;
+        }
+    };
+
+    let env: std::collections::HashMap<String, String> =
+        match val.get("env").and_then(|v| v.as_object()) {
+            Some(obj) => obj
+                .iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect(),
+            None => std::collections::HashMap::new(),
+        };
+
+    // Execute cmux on the host
+    let result = Command::new("cmux")
+        .args(&args)
+        .envs(&env)
+        .stdin(Stdio::null())
+        .output();
+
+    let (stdout_b64, stderr_b64, exit_code) = match result {
+        Ok(output) => {
+            let exit_code = output.status.code().unwrap_or(-1);
+            eprintln!("cmux {:?} -> exit {exit_code}", args);
+            (
+                base64_encode(&output.stdout),
+                base64_encode(&output.stderr),
+                exit_code,
+            )
+        }
+        Err(e) => {
+            eprintln!("Failed to execute cmux: {e}");
+            let msg = format!("failed to execute cmux: {e}");
+            ("".to_string(), base64_encode(msg.as_bytes()), -1)
+        }
+    };
+
+    let resp = serde_json::json!({
+        "stdout_b64": stdout_b64,
+        "stderr_b64": stderr_b64,
+        "exit_code": exit_code,
+    });
+    let resp_str = resp.to_string();
+    let response = tiny_http::Response::from_string(&resp_str)
+        .with_header(
+            "Content-Type: application/json"
+                .parse::<tiny_http::Header>()
+                .unwrap(),
+        )
+        .with_status_code(200);
+    let _ = request.respond(response);
 }
 
 /// Ensure the browser relay is running. If already running, returns the existing token.
@@ -199,6 +283,23 @@ pub fn any_devcontainers_running() -> Result<bool> {
     Ok(!stdout.trim().is_empty())
 }
 
+/// Encode bytes as base64 (standard alphabet with padding).
+fn base64_encode(input: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::with_capacity((input.len() + 2) / 3 * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+        result.push(if chunk.len() > 1 { CHARS[((triple >> 6) & 0x3F) as usize] as char } else { '=' });
+        result.push(if chunk.len() > 2 { CHARS[(triple & 0x3F) as usize] as char } else { '=' });
+    }
+    result
+}
+
 /// Generate a random hex token using /dev/urandom.
 fn generate_token() -> Result<String> {
     let mut buf = [0u8; 16];
@@ -223,5 +324,30 @@ mod tests {
         let t1 = generate_token().unwrap();
         let t2 = generate_token().unwrap();
         assert_ne!(t1, t2);
+    }
+
+    #[test]
+    fn base64_encode_empty() {
+        assert_eq!(base64_encode(b""), "");
+    }
+
+    #[test]
+    fn base64_encode_hello() {
+        assert_eq!(base64_encode(b"Hello"), "SGVsbG8=");
+    }
+
+    #[test]
+    fn base64_encode_multiline() {
+        assert_eq!(base64_encode(b"line1\nline2\n"), "bGluZTEKbGluZTIK");
+    }
+
+    #[test]
+    fn base64_encode_padding() {
+        // 1 byte -> 4 chars with ==
+        assert_eq!(base64_encode(b"A"), "QQ==");
+        // 2 bytes -> 4 chars with =
+        assert_eq!(base64_encode(b"AB"), "QUI=");
+        // 3 bytes -> 4 chars no padding
+        assert_eq!(base64_encode(b"ABC"), "QUJD");
     }
 }
