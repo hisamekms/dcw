@@ -11,6 +11,7 @@ A Rust CLI tool that wraps the `devcontainer` CLI and extends it with:
 - **Config merging** — deep-merges `devcontainer.local.json` on top of `devcontainer.json`
 - **Lifecycle management** — `up` / `exec` / `down` for the full devcontainer lifecycle
 - **Browser relay** — token-authenticated HTTP relay to open URLs in the host browser from inside the container
+- **cmux relay** — transparent proxy that forwards `cmux` commands from inside the container to the host
 
 ## Typical Usage Pattern
 
@@ -258,6 +259,35 @@ curl -X POST http://host.docker.internal:19280/open \
   -H "Authorization: Bearer $BROWSER_RELAY_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}'
+```
+
+### cmux relay
+
+`dcw exec` automatically injects a `cmux` stub script into the container's `PATH`. This stub transparently proxies `cmux` commands to the host via the browser relay's `POST /cmux` endpoint, so tools inside the container can call `cmux` as if it were installed locally.
+
+**How it works:**
+
+1. The stub collects all arguments and `CMUX_*` environment variables into a JSON payload
+2. Sends a `POST /cmux` request to the relay on the host
+3. The relay executes `cmux` on the host and returns stdout, stderr (base64-encoded), and exit code
+4. The stub decodes and outputs the result, preserving the original exit code
+
+**Forwarded environment variables:**
+
+`dcw exec` forwards the following `CMUX_*` variables from the host into the container:
+
+- `CMUX_WORKSPACE_ID`
+- `CMUX_SURFACE_ID`
+- `CMUX_TAB_ID`
+- `CMUX_SOCKET_PATH`
+- `CMUX_SOCKET_PASSWORD`
+
+**Example usage inside the container:**
+
+```sh
+# cmux commands work transparently — no installation needed inside the container
+cmux list
+cmux split --horizontal
 ```
 
 ## Using with Podman

@@ -11,6 +11,7 @@
 - **設定マージ** — `devcontainer.local.json` を `devcontainer.json` に deep merge
 - **ライフサイクル管理** — `up` / `exec` / `down` による devcontainer の操作
 - **ブラウザリレー** — トークン認証付き HTTP リレーでコンテナ内からホストのブラウザで URL を開く
+- **cmux リレー** — コンテナ内の `cmux` コマンドをホストに透過的にプロキシ
 
 ## 典型的な使い方
 
@@ -258,6 +259,35 @@ curl -X POST http://host.docker.internal:19280/open \
   -H "Authorization: Bearer $BROWSER_RELAY_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}'
+```
+
+### cmux リレー
+
+`dcw exec` はコンテナの `PATH` に `cmux` スタブスクリプトを自動的に注入します。このスタブはブラウザリレーの `POST /cmux` エンドポイントを経由して `cmux` コマンドをホストに透過的にプロキシするため、コンテナ内のツールはローカルにインストールされているかのように `cmux` を呼び出せます。
+
+**仕組み:**
+
+1. スタブがすべての引数と `CMUX_*` 環境変数を JSON ペイロードに収集
+2. ホスト上のリレーに `POST /cmux` リクエストを送信
+3. リレーがホスト上で `cmux` を実行し、stdout・stderr（base64 エンコード）と終了コードを返却
+4. スタブが結果をデコードして出力し、元の終了コードを維持
+
+**転送される環境変数:**
+
+`dcw exec` は以下の `CMUX_*` 変数をホストからコンテナに転送します:
+
+- `CMUX_WORKSPACE_ID`
+- `CMUX_SURFACE_ID`
+- `CMUX_TAB_ID`
+- `CMUX_SOCKET_PATH`
+- `CMUX_SOCKET_PASSWORD`
+
+**コンテナ内での使用例:**
+
+```sh
+# cmux コマンドは透過的に動作 — コンテナ内へのインストール不要
+cmux list
+cmux split --horizontal
 ```
 
 ## Podman での利用
