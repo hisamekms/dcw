@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::io::Read;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use crate::process;
 use crate::workspace;
@@ -160,12 +161,23 @@ fn handle_cmux(request: tiny_http::Request, body: &str) {
             None => std::collections::HashMap::new(),
         };
 
-    // Execute cmux on the host
-    let result = Command::new("cmux")
-        .args(&args)
-        .envs(&env)
-        .stdin(Stdio::null())
-        .output();
+    // Execute cmux on the host.
+    // Remove all inherited CMUX_* env vars so stale values from the relay's
+    // launch context don't leak into the child process.
+    let inherited_cmux_keys: Vec<String> = std::env::vars()
+        .filter(|(k, _)| k.starts_with("CMUX_"))
+        .map(|(k, _)| k)
+        .collect();
+
+    let mut cmd = Command::new("cmux");
+    cmd.args(&args);
+    for key in &inherited_cmux_keys {
+        cmd.env_remove(key);
+    }
+    cmd.envs(&env);
+    cmd.stdin(Stdio::null());
+
+    let result = cmd.output();
 
     let (stdout_b64, stderr_b64, exit_code) = match result {
         Ok(output) => {
@@ -200,6 +212,74 @@ fn handle_cmux(request: tiny_http::Request, body: &str) {
     let _ = request.respond(response);
 }
 
+/// Start the relay server in a background thread within the current process.
+/// Returns the token. The server runs until the returned `RelayGuard` is dropped.
+/// This keeps the relay in the same process tree as the caller, which is
+/// required by cmux's process-origin authentication.
+pub fn start_relay_thread() -> Result<(String, RelayGuard)> {
+    let pid_file = workspace::relay_pid_file();
+    let token_file = workspace::relay_token_file();
+
+    // Check if relay is already running (from another dcw exec session)
+    if let Ok(contents) = fs::read_to_string(&pid_file) {
+        if let Ok(pid) = contents.trim().parse::<i32>() {
+            if process::is_dcw_process(pid) {
+                let token = fs::read_to_string(&token_file)
+                    .context("relay PID alive but token file missing")?;
+                return Ok((token.trim().to_string(), RelayGuard { server: None }));
+            }
+        }
+        let _ = fs::remove_file(&pid_file);
+    }
+
+    let token = generate_token()?;
+    let dir = workspace::shared_runtime_dir();
+    fs::create_dir_all(&dir).context("failed to create shared runtime directory")?;
+    fs::write(&token_file, &token).context("failed to write relay token file")?;
+
+    let addr = format!("127.0.0.1:{RELAY_PORT}");
+    let server = tiny_http::Server::http(&addr)
+        .map_err(|e| anyhow::anyhow!("failed to bind {addr}: {e}"))?;
+    let server = Arc::new(server);
+
+    let pid = std::process::id();
+    fs::write(&pid_file, pid.to_string()).context("failed to write relay PID file")?;
+
+    let token_clone = token.clone();
+    let server_clone = Arc::clone(&server);
+    std::thread::spawn(move || {
+        for request in server_clone.incoming_requests() {
+            handle_request(request, &token_clone);
+        }
+    });
+
+    eprintln!("Browser relay started (in-process, port {RELAY_PORT}).");
+    Ok((token, RelayGuard { server: Some(server) }))
+}
+
+/// Guard that stops the in-process relay server when dropped.
+pub struct RelayGuard {
+    server: Option<Arc<tiny_http::Server>>,
+}
+
+impl Drop for RelayGuard {
+    fn drop(&mut self) {
+        if let Some(server) = self.server.take() {
+            server.unblock();
+            // Clean up PID/token files only if we own them
+            let pid_file = workspace::relay_pid_file();
+            if let Ok(contents) = fs::read_to_string(&pid_file) {
+                if let Ok(pid) = contents.trim().parse::<u32>() {
+                    if pid == std::process::id() {
+                        let _ = fs::remove_file(&pid_file);
+                        let _ = fs::remove_file(workspace::relay_token_file());
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Ensure the browser relay is running. If already running, returns the existing token.
 /// Otherwise, generates a new token, spawns the relay process, and returns the token.
 pub fn ensure_relay_running() -> Result<String> {
@@ -232,11 +312,14 @@ pub fn ensure_relay_running() -> Result<String> {
 
     // Spawn relay server
     let exe = std::env::current_exe().context("failed to get current executable path")?;
+    let log_path = dir.join("browser-relay.log");
+    let log_file = fs::File::create(&log_path)
+        .context("failed to create relay log file")?;
     let child = Command::new(&exe)
         .args(["browser-relay", "serve"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::from(log_file))
         .spawn()
         .context("failed to spawn browser relay")?;
 

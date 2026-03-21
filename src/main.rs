@@ -12,7 +12,7 @@ use clap::Parser;
 use commands::{browser_relay, down, exec, port, up, update};
 
 #[derive(Parser)]
-#[command(name = "dcw", about = "Devcontainer CLI helper")]
+#[command(name = "dcw", about = "Devcontainer CLI helper", version)]
 enum Cli {
     /// Start the devcontainer
     Up(up::UpArgs),

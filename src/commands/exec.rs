@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::commands::browser_relay;
 use crate::config;
 use crate::workspace;
 
@@ -37,6 +38,16 @@ pub fn run(args: &ExecArgs) -> Result<()> {
         cmd_args.push("--docker-compose-path".to_string());
         cmd_args.push(crate::docker::docker_compose_path());
     }
+
+    // Start relay in-process so cmux child processes inherit our process tree
+    // (cmux requires callers to be descendants of a cmux terminal).
+    let _relay_guard = match browser_relay::start_relay_thread() {
+        Ok((_, guard)) => Some(guard),
+        Err(e) => {
+            eprintln!("Warning: failed to start browser relay: {e}");
+            None
+        }
+    };
 
     cmd_args.extend(build_relay_wrapped_cmd(&args.cmd));
 
