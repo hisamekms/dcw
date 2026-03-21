@@ -213,37 +213,24 @@ fn handle_cmux(request: tiny_http::Request, body: &str) {
 }
 
 /// Start the relay server in a background thread within the current process.
-/// Returns the token. The server runs until the returned `RelayGuard` is dropped.
-/// This keeps the relay in the same process tree as the caller, which is
-/// required by cmux's process-origin authentication.
-pub fn start_relay_thread() -> Result<(String, RelayGuard)> {
-    let pid_file = workspace::relay_pid_file();
-    let token_file = workspace::relay_token_file();
-
-    // Check if relay is already running (from another dcw exec session)
-    if let Ok(contents) = fs::read_to_string(&pid_file) {
-        if let Ok(pid) = contents.trim().parse::<i32>() {
-            if process::is_dcw_process(pid) {
-                let token = fs::read_to_string(&token_file)
-                    .context("relay PID alive but token file missing")?;
-                return Ok((token.trim().to_string(), RelayGuard { server: None }));
-            }
-        }
-        let _ = fs::remove_file(&pid_file);
-    }
-
+/// Binds to an OS-assigned random port so multiple `dcw exec` sessions can
+/// each run their own independent relay. Returns the token, the port, and a
+/// guard that stops the server when dropped.
+///
+/// Running the relay in-process keeps cmux child processes in the caller's
+/// process tree, which is required by cmux's process-origin authentication.
+pub fn start_relay_thread() -> Result<(String, u16, RelayGuard)> {
     let token = generate_token()?;
-    let dir = workspace::shared_runtime_dir();
-    fs::create_dir_all(&dir).context("failed to create shared runtime directory")?;
-    fs::write(&token_file, &token).context("failed to write relay token file")?;
 
-    let addr = format!("127.0.0.1:{RELAY_PORT}");
-    let server = tiny_http::Server::http(&addr)
-        .map_err(|e| anyhow::anyhow!("failed to bind {addr}: {e}"))?;
+    // Bind to port 0 to let the OS pick an available port.
+    let server = tiny_http::Server::http("127.0.0.1:0")
+        .map_err(|e| anyhow::anyhow!("failed to bind relay: {e}"))?;
+    let port = server
+        .server_addr()
+        .to_ip()
+        .context("relay server has no IP address")?
+        .port();
     let server = Arc::new(server);
-
-    let pid = std::process::id();
-    fs::write(&pid_file, pid.to_string()).context("failed to write relay PID file")?;
 
     let token_clone = token.clone();
     let server_clone = Arc::clone(&server);
@@ -253,30 +240,17 @@ pub fn start_relay_thread() -> Result<(String, RelayGuard)> {
         }
     });
 
-    eprintln!("Browser relay started (in-process, port {RELAY_PORT}).");
-    Ok((token, RelayGuard { server: Some(server) }))
+    Ok((token, port, RelayGuard { server }))
 }
 
 /// Guard that stops the in-process relay server when dropped.
 pub struct RelayGuard {
-    server: Option<Arc<tiny_http::Server>>,
+    server: Arc<tiny_http::Server>,
 }
 
 impl Drop for RelayGuard {
     fn drop(&mut self) {
-        if let Some(server) = self.server.take() {
-            server.unblock();
-            // Clean up PID/token files only if we own them
-            let pid_file = workspace::relay_pid_file();
-            if let Ok(contents) = fs::read_to_string(&pid_file) {
-                if let Ok(pid) = contents.trim().parse::<u32>() {
-                    if pid == std::process::id() {
-                        let _ = fs::remove_file(&pid_file);
-                        let _ = fs::remove_file(workspace::relay_token_file());
-                    }
-                }
-            }
-        }
+        self.server.unblock();
     }
 }
 

@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -41,15 +40,18 @@ pub fn run(args: &ExecArgs) -> Result<()> {
 
     // Start relay in-process so cmux child processes inherit our process tree
     // (cmux requires callers to be descendants of a cmux terminal).
-    let _relay_guard = match browser_relay::start_relay_thread() {
-        Ok((_, guard)) => Some(guard),
+    let relay = match browser_relay::start_relay_thread() {
+        Ok((token, port, guard)) => Some((token, port, guard)),
         Err(e) => {
             eprintln!("Warning: failed to start browser relay: {e}");
             None
         }
     };
 
-    cmd_args.extend(build_relay_wrapped_cmd(&args.cmd));
+    cmd_args.extend(build_relay_wrapped_cmd(
+        &args.cmd,
+        relay.as_ref().map(|(token, port, _)| (token.as_str(), *port)),
+    ));
 
     let status = Command::new("devcontainer")
         .args(&cmd_args)
@@ -90,11 +92,12 @@ fn collect_cmux_env() -> Vec<(String, String)> {
 }
 
 /// Wrap the user's command to inject BROWSER stub, cmux stub, and relay env vars.
-/// If the relay token file does not exist, returns the original command unchanged.
-fn build_relay_wrapped_cmd(cmd: &[String]) -> Vec<String> {
-    let token = match fs::read_to_string(workspace::relay_token_file()) {
-        Ok(t) if !t.trim().is_empty() => t.trim().to_string(),
-        _ => return cmd.to_vec(),
+/// `relay` provides the token and port from the in-process relay. If `None`, the
+/// original command is returned unchanged.
+fn build_relay_wrapped_cmd(cmd: &[String], relay: Option<(&str, u16)>) -> Vec<String> {
+    let (token, port) = match relay {
+        Some((t, p)) => (t.to_string(), p),
+        None => return cmd.to_vec(),
     };
 
     let host = relay_host();
@@ -132,7 +135,7 @@ fn build_relay_wrapped_cmd(cmd: &[String]) -> Vec<String> {
         r#"  -H "Authorization: Bearer $DCW_BROWSER_TOKEN" \"#, "\n",
         r#"  -H "Content-Type: application/json" \"#, "\n",
         r#"  -d "$_body" \"#, "\n",
-        r#"  "http://$DCW_RELAY_HOST:19280/cmux" 2>/dev/null)"#, "\n",
+        r#"  "http://$DCW_RELAY_HOST:$DCW_RELAY_PORT/cmux" 2>/dev/null)"#, "\n",
         r#"if [ $? -ne 0 ] || [ -z "$_resp" ]; then"#, "\n",
         r#"  echo "cmux relay: connection failed" >&2; exit 1"#, "\n",
         r#"fi"#, "\n",
@@ -149,9 +152,10 @@ fn build_relay_wrapped_cmd(cmd: &[String]) -> Vec<String> {
         concat!(
             r#"export DCW_BROWSER_TOKEN='{token}'; "#,
             r#"export DCW_RELAY_HOST='{host}'; "#,
+            r#"export DCW_RELAY_PORT='{port}'; "#,
             r#"{cmux_exports}"#,
             r#"_dcw_b=$(mktemp); "#,
-            r#"printf '%s\n' '#!/bin/sh' 'curl -sf -X POST -H "Authorization: Bearer $DCW_BROWSER_TOKEN" -H "Content-Type: application/json" -d "{{\"url\":\"$1\"}}" http://$DCW_RELAY_HOST:19280/open >/dev/null 2>&1' > "$_dcw_b"; "#,
+            r#"printf '%s\n' '#!/bin/sh' 'curl -sf -X POST -H "Authorization: Bearer $DCW_BROWSER_TOKEN" -H "Content-Type: application/json" -d "{{\"url\":\"$1\"}}" http://$DCW_RELAY_HOST:$DCW_RELAY_PORT/open >/dev/null 2>&1' > "$_dcw_b"; "#,
             r#"chmod +x "$_dcw_b"; "#,
             r#"export BROWSER="$_dcw_b"; "#,
             r#"_dcw_bin=$(mktemp -d); "#,
@@ -164,6 +168,7 @@ fn build_relay_wrapped_cmd(cmd: &[String]) -> Vec<String> {
         ),
         token = token,
         host = host,
+        port = port,
         cmux_exports = cmux_exports,
         cmux_stub = cmux_stub,
     );
