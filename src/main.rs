@@ -1,3 +1,4 @@
+mod browser;
 mod commands;
 mod config;
 mod docker;
@@ -8,7 +9,7 @@ mod workspace;
 use anyhow::Result;
 use clap::Parser;
 
-use commands::{down, exec, port, up, update};
+use commands::{browser_relay, down, exec, port, up, update};
 
 #[derive(Parser)]
 #[command(name = "dcw", about = "Devcontainer CLI helper")]
@@ -26,6 +27,12 @@ enum Cli {
     },
     /// Update dcw to the latest version
     Update(update::UpdateArgs),
+    /// Internal: browser relay server
+    #[command(name = "browser-relay")]
+    BrowserRelay {
+        #[command(subcommand)]
+        action: browser_relay::BrowserRelayAction,
+    },
 }
 
 fn main() -> Result<()> {
@@ -37,5 +44,6 @@ fn main() -> Result<()> {
         Cli::Exec(args) => exec::run(args),
         Cli::Port { action } => port::run(action),
         Cli::Update(args) => update::run(args),
+        Cli::BrowserRelay { action } => browser_relay::run(action),
     }
 }

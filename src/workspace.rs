@@ -45,6 +45,26 @@ pub fn watcher_pid_file() -> Result<PathBuf> {
     Ok(runtime_dir()?.join("watch.pid"))
 }
 
+/// Returns the shared dcw runtime directory (not workspace-specific).
+/// Uses `$XDG_RUNTIME_DIR/dcw/`, falling back to `/tmp/dcw-<uid>/dcw/`.
+pub fn shared_runtime_dir() -> PathBuf {
+    let base = match env::var("XDG_RUNTIME_DIR") {
+        Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => PathBuf::from(format!("/tmp/dcw-{}", unsafe { libc::getuid() })),
+    };
+    base.join("dcw")
+}
+
+/// Path to the browser relay PID file.
+pub fn relay_pid_file() -> PathBuf {
+    shared_runtime_dir().join("browser-relay.pid")
+}
+
+/// Path to the browser relay token file.
+pub fn relay_token_file() -> PathBuf {
+    shared_runtime_dir().join("browser-relay.token")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

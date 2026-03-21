@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use crate::commands::browser_relay;
 use crate::config;
 use crate::docker;
 use crate::forward_ports;
@@ -77,6 +78,12 @@ pub fn run(args: &UpArgs) -> Result<()> {
 
     if args.watch {
         spawn_watcher()?;
+    }
+
+    // Start browser relay if not already running (non-fatal)
+    match browser_relay::ensure_relay_running() {
+        Ok(_) => println!("Browser relay ready."),
+        Err(e) => eprintln!("Warning: failed to start browser relay: {e}"),
     }
 
     Ok(())

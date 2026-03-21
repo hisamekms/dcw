@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use std::fs;
 
+use crate::commands::browser_relay;
 use crate::docker;
 use crate::workspace;
 
@@ -32,6 +33,11 @@ pub fn run() -> Result<()> {
             println!("No running devcontainer found (already stopped).");
         }
     }
+    // Stop browser relay if no other devcontainers are running
+    if !browser_relay::any_devcontainers_running().unwrap_or(true) {
+        browser_relay::stop_relay();
+    }
+
     Ok(())
 }
 
