@@ -1,0 +1,416 @@
+---
+name: localflow
+description: "Task management using localflow CLI. Provides workflows for adding, auto-selecting, executing, completing, canceling tasks and managing dependencies. Triggers on \"/localflow\", \"タスク追加\", \"次のタスク\", \"タスク実行\", \"タスクを作って\", \"タスク一覧\", \"タスク完了\", \"タスクキャンセル\", \"依存関係\", \"依存グラフ\", \"タスクグラフ\", \"DoDチェック\", \"add task\", \"next task\", \"complete task\", \"cancel task\", \"task list\", \"task dependencies\", \"dependency graph\", \"dod check\" or similar task management requests."
+argument-hint: "[<id> | add <description> | list | graph | complete <id> | cancel <id> | deps ...]"
+---
+
+# localflow — Task Management Skill
+
+Manage and execute project tasks using the `localflow` CLI. localflow is a SQLite-backed task management tool with priority-driven selection and dependency tracking.
+
+## Commands
+
+- `/localflow` — Auto-select and execute the next eligible task
+- `/localflow <id>` — Execute a specific task by ID
+- `/localflow add <description>` — Add a new task (interactive planning)
+- `/localflow add --simple <description>` — Add a task without planning phase
+- `/localflow list` — Show task list
+- `/localflow graph` — Show dependency graph (Mermaid diagram)
+- `/localflow complete <id>` — Mark a task as completed
+- `/localflow cancel <id>` — Cancel a task
+- `/localflow dod check <task_id> <index>` — Mark a DoD item as checked
+- `/localflow dod uncheck <task_id> <index>` — Unmark a DoD item
+- `/localflow deps add <task_id> --on <dep_id>` — Add a dependency
+- `/localflow deps remove <task_id> --on <dep_id>` — Remove a dependency
+- `/localflow deps list <task_id>` — List dependencies of a task
+
+## Argument Parsing
+
+Parse `$ARGUMENTS` with these rules:
+
+1. **Empty**: Auto-select next task (see "Auto-Select")
+2. **Starts with `add`**: Create a new task with the rest as description (see "Add Task")
+   - If `--simple` is present, use simple mode (skip planning phase)
+3. **`list`**: Show task list (see "List Tasks")
+4. **`graph`**: Show dependency graph (see "Dependency Graph")
+5. **`complete <id>`**: Complete the specified task (see "Complete Task")
+6. **`cancel <id>`**: Cancel the specified task (see "Cancel Task")
+7. **Starts with `dod`**: Manage DoD check state (see "DoD Check/Uncheck")
+8. **Starts with `deps`**: Manage dependencies (see "Manage Dependencies")
+9. **Number**: Execute that task (see "Execute Task")
+
+## localflow CLI Reference
+
+All commands use `localflow`. Default output is JSON. The `--output` flag is **global** and must precede the subcommand.
+
+```bash
+# Add a task (created in draft status)
+localflow add --title "Title" --priority p1 --details "Details"
+
+# List tasks (with filters)
+localflow --output text list
+localflow list --status todo
+localflow list --status in-progress    # CLI uses kebab-case for status values
+localflow list --ready                 # todo tasks with all deps completed
+localflow list --tag backend
+
+# Get task details (JSON only, no text output)
+localflow get <id>
+
+# Auto-select next task (highest-priority ready task → in_progress)
+localflow next
+
+# Edit task fields
+localflow edit <id> --title "New Title" --status todo --add-tag backend
+localflow edit <id> --add-definition-of-done "Write unit tests"
+
+# Complete / Cancel
+localflow complete <id>                    # fails if unchecked DoD items exist
+localflow cancel <id> --reason "Reason text"
+
+# Definition of Done (DoD) check/uncheck (1-based index)
+localflow dod check <task_id> <index>      # mark DoD item as done
+localflow dod uncheck <task_id> <index>    # unmark DoD item
+
+# Dependencies
+localflow deps add <task_id> --on <dep_id>
+localflow deps remove <task_id> --on <dep_id>
+localflow deps set <task_id> --on <dep_id1> <dep_id2>
+localflow deps list <task_id>
+```
+
+### Important CLI details
+
+- `--output text|json` and `--dry-run` are **global flags** — place them before the subcommand: `localflow --output text list`, `localflow --dry-run edit 1 --status todo`
+- `--dry-run` shows what would happen without actually executing the command. Available for all state-changing commands (`add`, `edit`, `complete`, `cancel`, `next`, `deps add/remove/set`, `dod check/uncheck`). Read-only commands (`list`, `get`, `deps list`) ignore it.
+- **DoD items have a checked state.** `complete` will fail if any DoD items are unchecked. Use `dod check <task_id> <index>` (1-based index) to mark items before completing. Tasks with no DoD items can complete freely.
+- Status values in CLI flags use **kebab-case**: `todo`, `in-progress`, `completed`, `canceled` (JSON output uses snake_case: `in_progress`)
+- `get` only outputs JSON (no `--output text` support)
+- New tasks start in `draft` status. Status transitions: draft → todo → in_progress → completed. Any active status → canceled.
+- Priority levels: `p0` (highest) through `p3` (lowest). Default is `p2`.
+
+---
+
+## List Tasks
+
+Retrieve and display tasks using `localflow list`.
+
+```bash
+localflow --output text list
+```
+
+Use `--status`, `--tag`, and `--ready` to filter results. Combine filters as needed.
+
+---
+
+## Dependency Graph
+
+Visualize task dependencies as a text-based graph for terminal display.
+
+### Procedure
+
+1. Fetch all tasks:
+
+```bash
+localflow list
+```
+
+2. From the JSON output, build a dependency graph. Each task's `dependencies` array lists the IDs it depends on.
+
+3. Render the graph as a text-based diagram using these conventions:
+
+- **Status indicators**: `[✓]` completed, `[▶]` in_progress, `[ ]` todo, `[-]` draft, `[✗]` canceled
+- **Priority badge**: `(P0)` through `(P3)`
+- **Arrows**: Use `→` to show dependency flow (from dependency to dependent task)
+- **Layers**: Group tasks by depth in the dependency tree (root tasks first, then their dependents)
+- Use box-drawing characters (`─`, `│`, `├`, `└`, `┬`) for connectors
+
+### Example output
+
+Given tasks: #1 (completed), #2 depends on #1 (in_progress), #3 depends on #1 (todo), #4 depends on #2 and #3 (todo), #5 (no deps, draft):
+
+```
+Dependency Graph
+================
+
+[✓] #1 Setup database (P0)
+ ├──→ [▶] #2 Implement API (P1)
+ │     └──→ [ ] #4 Deploy to staging (P2)
+ └──→ [ ] #3 Write tests (P1)
+       └──→ [ ] #4 Deploy to staging (P2)
+
+[-] #5 Update docs (P3)
+
+Legend: [✓] completed  [▶] in_progress  [ ] todo  [-] draft  [✗] canceled
+```
+
+For tasks with multiple dependencies (like #4 above), they appear under each parent. This makes all dependency paths visible.
+
+### When a task has many dependencies
+
+If the graph is large, also provide a flat summary table after the graph:
+
+```
+Task Dependencies Summary
+==========================
+#1  Setup database        (P0) [✓]  deps: none
+#2  Implement API         (P1) [▶]  deps: #1
+#3  Write tests           (P1) [ ]  deps: #1
+#4  Deploy to staging     (P2) [ ]  deps: #2, #3
+#5  Update docs           (P3) [-]  deps: none
+```
+
+---
+
+## Add Task
+
+### Normal vs Simple Mode
+
+- **Normal** (`add <description>`): Phase 1 → 2 → 3 → 4 (full workflow)
+- **Simple** (`add --simple <description>`): Phase 1 → 3 → 4 (skip planning)
+
+### Procedure
+
+#### Phase 1: Create Task (draft)
+
+```bash
+localflow add --title "<description>"
+```
+
+Capture the `id` from JSON output for subsequent phases.
+
+#### Phase 2: Planning (clarification loop)
+
+> **Skip this phase in simple mode.**
+
+Plan the task through conversation (do not enter plan mode). Repeat until no open questions remain:
+
+1. Based on the task description and codebase investigation, list **unclear points and decisions needed**
+2. If the list is empty, proceed to Phase 3
+3. For each item, ask the user via `AskUserQuestion`:
+   - Present options for each question
+   - Mark at least one option with "(Recommended)" when possible
+4. After all questions are resolved, return to step 1 — previous answers may raise new questions
+
+Continue until **no open questions remain**.
+
+#### Phase 3: Dependency Discovery
+
+Check existing active tasks for potential dependencies:
+
+```bash
+localflow list --status todo
+localflow list --status in-progress
+```
+
+Review the list to identify tasks the new task should depend on.
+
+#### Phase 4: Finalize Task
+
+**Normal mode:**
+
+1. Update the task with planning results
+2. Use `AskUserQuestion` to confirm:
+   - Title and content are appropriate
+   - Dependencies to add
+   - Tags to set
+   - Priority (default p2) adjustment
+3. Apply confirmed settings:
+
+```bash
+localflow edit <id> \
+  --title "Final title" \
+  --details "Planning details" \
+  --priority p1 \
+  --status todo \
+  --add-tag backend \
+  --add-definition-of-done "Write unit tests" \
+  --add-definition-of-done "E2E tests pass"
+
+# If dependencies exist
+localflow deps add <id> --on <dep_id>
+```
+
+**Simple mode:**
+
+1. Set the user's description as details
+2. Transition to todo:
+
+```bash
+localflow edit <id> --details "<description>" --status todo
+```
+
+Display the finalized task details to the user.
+
+---
+
+## Auto-Select
+
+Use `localflow next` to auto-select the highest-priority eligible task.
+
+```bash
+localflow next
+```
+
+- **Success**: The selected task moves to `in_progress`. Read task info from JSON output and proceed to "Execute Task" Step 2.
+- **No eligible tasks**: Inform the user and stop.
+
+---
+
+## Execute Task
+
+### Pre-check
+
+> Skip this step if coming from `localflow next` (already validated).
+
+```bash
+localflow get <id>
+```
+
+- Verify `status` is `todo`. If not, inform the user and stop.
+- Check `dependencies` for incomplete tasks. If any, inform the user and stop.
+
+Then transition:
+
+```bash
+localflow edit <id> --status in-progress
+```
+
+### Execution Steps
+
+#### Step 1: Review Task
+
+Read full task info from `localflow get <id>` output: `details`, `definition_of_done`, `in_scope`, `out_of_scope`.
+
+#### Step 2: Create Worktree
+
+Generate a branch name from the task title. Use the `/wth` skill to create a worktree.
+
+#### Step 3: Plan Mode
+
+Use `EnterPlanMode` to create an implementation plan. Investigate the codebase based on the task's details.
+
+Wait for the user to approve the plan.
+
+Include this in the plan:
+
+```
+# Post-completion
+- When implementation is done, use `AskUserQuestion` to ask the user for completion approval
+- Complete the task: `localflow complete <id>`
+- Delete the worktree (using `/wth` skill)
+```
+
+#### Step 4: Implement
+
+Follow the approved plan. Use the standard coding workflow.
+
+---
+
+## Complete Task
+
+Mark a task as completed. `complete` will fail if any DoD items are unchecked.
+
+```bash
+localflow get <id>
+```
+
+1. Verify the task is in `in_progress` status. If not, inform the user and stop.
+2. Check if any DoD items are unchecked (`"checked": false` in JSON, or `[ ]` in text output). If unchecked items exist:
+   - Show the unchecked items to the user
+   - Check them off one by one with `localflow dod check <id> <index>` (1-based index)
+   - Then proceed to complete
+
+```bash
+localflow complete <id>
+```
+
+Display the completed task info to the user. If there is an associated worktree, remind the user to clean it up.
+
+---
+
+## DoD Check/Uncheck
+
+Manage the checked state of Definition of Done items. Indices are **1-based** (first item = 1).
+
+### `dod check <task_id> <index>`
+
+Mark a DoD item as done:
+
+```bash
+localflow dod check <task_id> <index>
+```
+
+### `dod uncheck <task_id> <index>`
+
+Unmark a DoD item:
+
+```bash
+localflow dod uncheck <task_id> <index>
+```
+
+### Display format
+
+DoD items show their check state in task output:
+
+- **Text output**: `[x] Write unit tests` / `[ ] E2E tests pass`
+- **JSON output**: `{"content": "Write unit tests", "checked": true}`
+
+---
+
+## Cancel Task
+
+Cancel a task. Ask the user for a cancellation reason if not provided.
+
+```bash
+localflow get <id>
+```
+
+Verify the task is not already in a terminal state (`completed` or `canceled`). If it is, inform the user and stop.
+
+```bash
+localflow cancel <id> --reason "User-provided reason"
+```
+
+Display the canceled task info to the user. If there is an associated worktree, remind the user to clean it up.
+
+---
+
+## Manage Dependencies
+
+Handle dependency operations based on the subcommand.
+
+### `deps add <task_id> --on <dep_id>`
+
+Add a dependency. localflow will reject circular and self-dependencies automatically.
+
+```bash
+localflow deps add <task_id> --on <dep_id>
+```
+
+### `deps remove <task_id> --on <dep_id>`
+
+Remove a dependency.
+
+```bash
+localflow deps remove <task_id> --on <dep_id>
+```
+
+### `deps list <task_id>`
+
+Show all tasks that the given task depends on.
+
+```bash
+localflow deps list <task_id>
+```
+
+Display results to the user. If there are unresolved dependencies, note which ones are blocking.
+
+---
+
+## Notes
+
+- **Language**: Respond in the same language the user uses
+- **Errors**: When localflow returns an error, clearly communicate the error details to the user
+- **Safety**: Be careful with worktree creation/deletion and branch operations
+- **Output format**: Use `--output text` (global flag, before subcommand) for human display; use JSON (default) for programmatic processing

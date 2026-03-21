@@ -1,13 +1,25 @@
 {
-  "name": "Rust",
+  "name": "dcw",
   "build": {
     "dockerfile": "Dockerfile",
   },
-  "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
-    "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers/features/node:1": { "version": "24" },
-    "ghcr.io/devcontainers/features/rust:1": {},
+  "remoteUser": "dev",
+  "containerUser": "dev",
+  "mounts": [
+    "source=mise,target=/home/dev/.local/share/mise,type=volume",
+    "source=${localWorkspaceFolderBasename}-prek-cache,target=/home/dev/.cache/prek,type=volume",
+    "source=${localWorkspaceFolderBasename}-worktrees,target=${containerWorkspaceFolder}/worktrees,type=volume",
+    "source=${localWorkspaceFolderBasename}-claude-code,target=/home/dev/.claude,type=volume",
+    "source=${localEnv:HOME}/.local/share/chezmoi,target=/home/dev/.local/share/chezmoi,type=bind,consistency=cached",
+    "source=${localWorkspaceFolderBasename}-rust,target=/home/dev/.cargo,type=volume",
+    "source=${localWorkspaceFolderBasename}-rust-up,target=/home/dev/.rustup,type=volume",
+  ],
+  "containerEnv": {
+    "MISE_TRUSTED_CONFIG_PATHS": "/workspaces/dcw",
   },
-  "postCreateCommand": "npm install -g @devcontainers/cli",
+  "features": {},
+  "workspaceFolder": "/workspaces/dcw",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/dcw,type=bind,consistency=delegated",
+  "postCreateCommand": "bash ./.devcontainer/post-create.sh",
+  "postStartCommand": "bash ./.devcontainer/post-start.sh",
 }
