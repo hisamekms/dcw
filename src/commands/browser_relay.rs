@@ -46,6 +46,12 @@ fn run_serve() -> Result<()> {
 }
 
 fn handle_request(mut request: tiny_http::Request, expected_token: &str) {
+    // Health check endpoint (no auth required)
+    if request.url() == "/health" && request.method() == &tiny_http::Method::Get {
+        let _ = request.respond(tiny_http::Response::from_string("OK").with_status_code(200));
+        return;
+    }
+
     // Check authorization
     let expected_value = format!("Bearer {expected_token}");
     let auth_ok = request

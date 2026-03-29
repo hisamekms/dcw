@@ -192,6 +192,26 @@ fn build_relay_wrapped_cmd(
         ));
     }
 
+    // Watchdog: monitors relay health, kills process group if relay becomes unreachable
+    script.push_str(concat!(
+        r#"_dcw_watchdog() { "#,
+        r#"_fail=0; "#,
+        r#"while true; do "#,
+        r#"sleep 10; "#,
+        r#"if curl -sf -o /dev/null "http://$DCW_RELAY_HOST:$DCW_RELAY_PORT/health" 2>/dev/null; then "#,
+        r#"_fail=0; "#,
+        r#"else "#,
+        r#"_fail=$((_fail + 1)); "#,
+        r#"if [ "$_fail" -ge 3 ]; then "#,
+        r#"kill -TERM -$$ 2>/dev/null; "#,
+        r#"exit 0; "#,
+        r#"fi; "#,
+        r#"fi; "#,
+        r#"done; "#,
+        r#"}; "#,
+        r#"_dcw_watchdog & "#,
+    ));
+
     script.push_str(r#"exec "$@""#);
 
     let mut wrapped = vec![
